@@ -21,7 +21,7 @@ import (
 	"github.com/frostloom/ai-gateway/internal/pkg/controlplane"
 	"github.com/frostloom/ai-gateway/internal/pkg/metrics"
 	"github.com/frostloom/ai-gateway/internal/pkg/tokens"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // Native 接收 Claude 的 Messages 或 Codex 的 Responses，原样转给上游对应入口。

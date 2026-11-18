@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // M9 订阅额度（GPT Plus 式）单测：档次解析、Reserve 额度内/超额/免费绕过、窗口滚动恢复、

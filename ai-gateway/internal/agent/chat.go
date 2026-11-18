@@ -19,7 +19,7 @@ import (
 	"github.com/frostloom/ai-gateway/internal/billing/store"
 	"github.com/frostloom/ai-gateway/internal/gateway/client"
 	"github.com/frostloom/ai-gateway/internal/observability"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 const sessionTTL = 30 * time.Minute

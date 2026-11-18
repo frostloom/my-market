@@ -10,7 +10,7 @@ syntax = "proto3";
 
 package billing.v1;
 
-option go_package = "github.com/frostloom/ai-gateway/internal/proto/billing/v1;billingv1";
+option go_package = "github.com/frostloom/ai-gateway/pkg/proto/billing/v1;billingv1";
 
 // BillingService 计费控制面。除 GetBalance 外全部幂等（按 request_id）。
 service BillingService {

@@ -28,7 +28,7 @@ import (
 	"github.com/frostloom/ai-gateway/internal/pkg/controlplane"
 	"github.com/frostloom/ai-gateway/internal/pkg/metrics"
 	"github.com/frostloom/ai-gateway/internal/pkg/quota"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 
 	_ "embed"
 )

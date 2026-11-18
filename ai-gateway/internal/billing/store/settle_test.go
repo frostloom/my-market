@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // mock-model 单价 1_000_000 分/M → estPrompt=84 时 pre = 84×1.2 = 100（见 seedMockModel）。
