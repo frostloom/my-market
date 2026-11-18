@@ -9,6 +9,10 @@
 #   docker compose -f deploy/compose/docker-compose.yml --profile ai up -d
 #   （两个 profile 可合用：--profile infra --profile ai up -d）
 #
+# 机器侧副作用（2026-11-18 首次起栈时处理）：旧仓遗留容器 ai-gateway-mysql / ai-gateway-redis /
+# ai-gateway-kafka 占着宿主 3307/6381/29092，与本栈端口冲突，已 docker stop（未删除，数据卷保留）。
+# 要回旧仓环境时：先停本栈，再 docker start ai-gateway-mysql ai-gateway-redis ai-gateway-kafka。
+#
 # 容器内互访一律走服务名 + 容器端口（mysql:3306 / redis:6379 / billing:9101 …），
 # 与宿主映射端口（3307/6381/29092）无关；各服务显式 LISTEN_HOST=0.0.0.0 才能被映射/互访
 # （代码默认 LISTEN_HOST=127.0.0.1，见 ai-gateway/internal/pkg/config.ListenAddr，容器里不设则全不通）。
@@ -115,7 +119,8 @@ services:
       MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/ai_gateway?charset=utf8mb4&parseTime=True&loc=Local
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      # 空则不启用 outbox relay；容器网络默认连内部 listener
+      # 容器内恒连内部 listener kafka:9092（此变量留空也用该默认，不会禁用 relay）；
+      # 仅宿主本地进程跑 billing 时才需要 127.0.0.1:29092
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
       SUB_RENEW_INTERVAL_SEC: ${SUB_RENEW_INTERVAL_SEC:-60}
     ports:
@@ -250,6 +255,11 @@ services:
       args: { SVC: mock-provider }
     image: my-market/mock-provider:local
     restart: unless-stopped
+    # 注意：schema.sql 种子数据把 provider 地址写成宿主回环 http://127.0.0.1:9201/9202
+    # （scripts/schema.sql providers 表），容器内 router 够不到 127.0.0.1。
+    # R0-T4 smoke 需用 admin API 或 SQL 把 provider 重指到 compose 服务名
+    # （http://mock-provider:9201），在那之前 gateway→router→mock 完整对话链路不通；
+    # 本服务自身启动/健康不受影响。
     environment:
       LISTEN_HOST: 0.0.0.0
       MOCK_PROVIDER_PORT: ${MOCK_PROVIDER_PORT:-9201}
