@@ -1,0 +1,271 @@
+# my-market 分 profile compose（R0）。
+#   infra：MySQL(3307, utf8mb4) / Redis(6381) / Kafka(宿主 29092) —— 端口与旧 ai-gateway compose 一致
+#   ai：   gateway / billing / router / agent / mock-provider（本地构建，共享 ai-gateway/deploy/docker/go-service.Dockerfile）
+#   R1 将追加 mall profile。
+#
+# 用法：
+#   cp deploy/compose/.env.example deploy/compose/.env   # 先填 CONTROL_PLANE_TOKEN（生成命令见模板注释）
+#   docker compose -f deploy/compose/docker-compose.yml --profile infra up -d
+#   docker compose -f deploy/compose/docker-compose.yml --profile ai up -d
+#   （两个 profile 可合用：--profile infra --profile ai up -d）
+#
+# 容器内互访一律走服务名 + 容器端口（mysql:3306 / redis:6379 / billing:9101 …），
+# 与宿主映射端口（3307/6381/29092）无关；各服务显式 LISTEN_HOST=0.0.0.0 才能被映射/互访
+# （代码默认 LISTEN_HOST=127.0.0.1，见 ai-gateway/internal/pkg/config.ListenAddr，容器里不设则全不通）。
+name: my-market
+
+services:
+  # ================= infra =================
+  mysql:
+    profiles: [infra]
+    # 国内网络 Docker Hub 直连不通，用 daocloud 镜像 tag（网络可达环境可改回 mysql:8.0）
+    image: docker.m.daocloud.io/library/mysql:8.0.40
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ai_gateway
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次建库自动建表：schema.sql 自带 CREATE DATABASE/USE ai_gateway（只读挂载，不改 SQL 内容）
+      - ../../ai-gateway/scripts/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    profiles: [infra]
+    image: docker.m.daocloud.io/library/redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Kafka 计费事件流（apache/kafka 官方镜像，KRaft 单节点无 zookeeper，与旧仓 compose 相同）。
+  # 双 listener：PLAINTEXT(kafka:9092) 供容器内客户端；PLAINTEXT_HOST(宿主 29092) 供宿主本地进程连。
+  # 单 advertised=localhost 会让容器内客户端按 advertised 连回自己 localhost → 失败。
+  kafka:
+    profiles: [infra]
+    image: docker.m.daocloud.io/apache/kafka:3.7.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "CONTROLLER://:9093,PLAINTEXT://:9092,PLAINTEXT_HOST://:29092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      # KAFKA_LOG_DIRS 指向镜像声明的 VOLUME 路径 /var/lib/kafka/data（属主 appuser uid 1000），
+      # 命名卷首次创建会继承镜像内目录属主，可写。不能用 /tmp 下的自造路径（镜像无此目录 →
+      # 新卷变 root 属主 → appuser 写 meta.properties 被拒、启动失败，已实测复现）。
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+    ports:
+      - "29092:29092" # 宿主 → PLAINTEXT_HOST（宿主本地进程用 127.0.0.1:29092）
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 30s
+      retries: 30
+
+  # 一次性建 topic（幂等）：主事件流 + 死信流，各 3 分区。kafka 健康后才执行。
+  # command 必须是单元素数组交给 bash -c 整段执行（字符串会被按空白拆参）。
+  kafka-init:
+    profiles: [infra]
+    image: docker.m.daocloud.io/apache/kafka:3.7.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic billing.events --partitions 3 --replication-factor 1 --config min.insync.replicas=1 --config flush.messages=1 --config flush.ms=0 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic billing.events.dlq --partitions 3 --replication-factor 1 --config min.insync.replicas=1 --config flush.messages=1 --config flush.ms=0"]
+
+  # ================= ai =================
+  # billing 先于 gateway（gateway gRPC 拨号虽是惰性，但保持启动次序清晰）。
+  billing:
+    profiles: [ai]
+    build:
+      context: ../../ai-gateway
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args: { SVC: billing }
+    image: my-market/billing:local
+    restart: unless-stopped
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 控制面令牌：billing/router/gateway/agent 未设置会直接退出，compose 里用 :? 在解析期就报错
+      CONTROL_PLANE_TOKEN: ${CONTROL_PLANE_TOKEN:?CONTROL_PLANE_TOKEN is required - see deploy/compose/.env.example}
+      BILLING_PORT: "9101"
+      BILLING_ADMIN_PORT: "9103"
+      MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/ai_gateway?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # 空则不启用 outbox relay；容器网络默认连内部 listener
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      SUB_RENEW_INTERVAL_SEC: ${SUB_RENEW_INTERVAL_SEC:-60}
+    ports:
+      - "9101:9101" # gRPC 控制面
+      - "9103:9103" # admin 观测 HTTP（/healthz /metrics）
+    depends_on:
+      # infra 属另一 profile：单独 --profile ai 时依赖自动跳过（容器经 restart 轮询重试）
+      mysql:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9103/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  router:
+    profiles: [ai]
+    build:
+      context: ../../ai-gateway
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args: { SVC: router }
+    image: my-market/router:local
+    restart: unless-stopped
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CONTROL_PLANE_TOKEN: ${CONTROL_PLANE_TOKEN:?CONTROL_PLANE_TOKEN is required - see deploy/compose/.env.example}
+      ROUTER_PORT: "9102"
+      MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/ai_gateway?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "9102:9102"
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9102/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  agent:
+    profiles: [ai]
+    build:
+      context: ../../ai-gateway
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args: { SVC: agent }
+    image: my-market/agent:local
+    restart: unless-stopped
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CONTROL_PLANE_TOKEN: ${CONTROL_PLANE_TOKEN:?CONTROL_PLANE_TOKEN is required - see deploy/compose/.env.example}
+      AGENT_PORT: "9105"
+      # 留空可正常启动（对话时返回明确错误提示，见 .env.example 注释）
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-flash}
+      BILLING_ADDR: billing:9101
+      BILLING_ADMIN_ADDR: http://billing:9103
+      MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/ai_gateway?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
+      ADMIN_DEFAULT_TENANT: ${ADMIN_DEFAULT_TENANT:-1}
+    ports:
+      - "9105:9105"
+    depends_on:
+      # infra 属另一 profile：单独 --profile ai 时依赖自动跳过（容器经 restart 轮询重试）
+      mysql:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9105/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  gateway:
+    profiles: [ai]
+    build:
+      context: ../../ai-gateway
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args: { SVC: gateway }
+    image: my-market/gateway:local
+    restart: unless-stopped
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CONTROL_PLANE_TOKEN: ${CONTROL_PLANE_TOKEN:?CONTROL_PLANE_TOKEN is required - see deploy/compose/.env.example}
+      # 默认 8080 常被占，显式 18080（与旧仓 README 快速开始一致）
+      GATEWAY_PORT: "18080"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}
+      BILLING_ADDR: billing:9101
+      BILLING_ADMIN_ADDR: http://billing:9103
+      ROUTER_ADDR: http://router:9102
+      AGENT_ADDR: http://agent:9105
+      # reconciler 暂无容器（R0 不起）；面板 /admin/health 聚合该项会显示不可达，不影响其余功能
+      RECONCILER_ADDR: http://reconciler:9106
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
+      ADMIN_DEFAULT_TENANT: ${ADMIN_DEFAULT_TENANT:-1}
+    ports:
+      - "18080:18080"
+    depends_on:
+      - billing
+      - router
+      - agent
+    healthcheck:
+      # gateway 无 /healthz 路由；探首页（管理面板 HTML，200）等价存活
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:18080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  mock-provider:
+    profiles: [ai]
+    build:
+      context: ../../ai-gateway
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args: { SVC: mock-provider }
+    image: my-market/mock-provider:local
+    restart: unless-stopped
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      MOCK_PROVIDER_PORT: ${MOCK_PROVIDER_PORT:-9201}
+      MOCK_PROVIDER_NAME: ${MOCK_PROVIDER_NAME:-mock-provider}
+      # 故障/延迟注入默认关闭（故障演练时改 .env：MOCK_FAIL_RATE=50 等）
+      MOCK_FAIL_RATE: ${MOCK_FAIL_RATE:-0}
+      MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-0}
+    ports:
+      - "${MOCK_PROVIDER_PORT:-9201}:${MOCK_PROVIDER_PORT:-9201}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:${MOCK_PROVIDER_PORT:-9201}/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:

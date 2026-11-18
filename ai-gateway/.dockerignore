@@ -1,0 +1,13 @@
+# 构建上下文瘦身：镜像只需要 go.mod/go.sum + cmd/ + internal/（含 go:embed 的 web/dist）。
+# 注意 scripts/schema.sql 不进镜像（由 compose 以只读挂载喂给 mysql 初始化）。
+eval/
+docs/
+scripts/
+knowledge/
+web/
+deploy/
+logs/
+.git/
+node_modules/
+*.log
+*.md
