@@ -1,0 +1,226 @@
+// mall-order：server.go 把 Store 结果映到 mallv1 契约消息，
+// 并把 mallerr 契约码映射为 gRPC status（bff 侧再映回 HTTP）。
+// 本任务只实现下单域：CreateCartOrder/GetOrder/ListOrders + 购物车四操作；
+// 支付域（MarkPaid/CancelOrder/RefundOrder）为下一任务，沿用内嵌
+// Unimplemented 的 codes.Unimplemented。
+package main
+
+import (
+	"context"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/frostloom/my-market/pkg/mallerr"
+	"github.com/frostloom/my-market/services/mall-gen/mallv1"
+)
+
+// orderServer mallv1.OrderService 实现（无状态，全部走 Store）。
+type orderServer struct {
+	mallv1.UnimplementedOrderServiceServer
+	store *Store
+}
+
+func newOrderServer(store *Store) *orderServer {
+	return &orderServer{store: store}
+}
+
+// CreateCartOrder 建单（契约 POST /orders，cart 结算分支）。
+func (s *orderServer) CreateCartOrder(ctx context.Context, req *mallv1.CreateCartOrderReq) (*mallv1.OrderReply, error) {
+	var tenantID uint64
+	var idemKey string
+	var lines []Line
+	if req != nil {
+		tenantID = req.GetTenantId()
+		idemKey = req.GetIdemKey()
+		lines = make([]Line, 0, len(req.GetLines()))
+		for _, l := range req.GetLines() {
+			lines = append(lines, Line{GoodsID: l.GetGoodsId(), Qty: int(l.GetQty())})
+		}
+	}
+	ord, err := s.store.CreateCartOrder(ctx, tenantID, idemKey, lines)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return toProtoOrder(ord), nil
+}
+
+// GetOrder 单笔订单（契约 GET /orders/{no}）。
+func (s *orderServer) GetOrder(ctx context.Context, req *mallv1.GetOrderReq) (*mallv1.OrderReply, error) {
+	var tenantID uint64
+	var orderNo string
+	if req != nil {
+		tenantID = req.GetTenantId()
+		orderNo = req.GetOrderNo()
+	}
+	ord, err := s.store.GetOrder(ctx, tenantID, orderNo)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return toProtoOrder(ord), nil
+}
+
+// ListOrders 订单列表（契约 GET /orders?cursor=，键集游标分页）。
+func (s *orderServer) ListOrders(ctx context.Context, req *mallv1.ListOrdersReq) (*mallv1.ListOrdersReply, error) {
+	var tenantID uint64
+	var page PageReq
+	if req != nil {
+		tenantID = req.GetTenantId()
+		page = PageReq{Cursor: req.GetPage().GetCursor(), PageSize: req.GetPage().GetPageSize()}
+	}
+	p, err := s.store.ListOrders(ctx, tenantID, page)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	items := make([]*mallv1.OrderReply, 0, len(p.Orders))
+	for _, o := range p.Orders {
+		items = append(items, toProtoOrder(o))
+	}
+	return &mallv1.ListOrdersReply{Items: items, NextCursor: p.NextCursor, HasMore: p.HasMore}, nil
+}
+
+// GetCart 购物车视图（契约 GET /cart）。
+func (s *orderServer) GetCart(ctx context.Context, req *mallv1.GetCartReq) (*mallv1.CartReply, error) {
+	var tenantID uint64
+	if req != nil {
+		tenantID = req.GetTenantId()
+	}
+	v, err := s.store.GetCart(ctx, tenantID)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return cartReply(v), nil
+}
+
+// AddCart 加购（契约 POST /cart/items，upsert 合并 qty）。
+func (s *orderServer) AddCart(ctx context.Context, req *mallv1.AddCartReq) (*mallv1.CartReply, error) {
+	var tenantID, goodsID uint64
+	var qty int32
+	if req != nil {
+		tenantID, goodsID, qty = req.GetTenantId(), req.GetGoodsId(), req.GetQty()
+	}
+	v, err := s.store.AddCart(ctx, tenantID, goodsID, int(qty))
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return cartReply(v), nil
+}
+
+// PatchCartQty 改数量（契约 PATCH /cart/items/{id}，qty=0 等价删除）。
+func (s *orderServer) PatchCartQty(ctx context.Context, req *mallv1.PatchCartQtyReq) (*mallv1.CartReply, error) {
+	var tenantID, itemID uint64
+	var qty int32
+	if req != nil {
+		tenantID, itemID, qty = req.GetTenantId(), req.GetItemId(), req.GetQty()
+	}
+	v, err := s.store.PatchCartQty(ctx, tenantID, itemID, int(qty))
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return cartReply(v), nil
+}
+
+// RemoveCart 删购物车行（契约 DELETE /cart/items/{id}，幂等）。
+func (s *orderServer) RemoveCart(ctx context.Context, req *mallv1.RemoveCartReq) (*mallv1.CartReply, error) {
+	var tenantID, itemID uint64
+	if req != nil {
+		tenantID, itemID = req.GetTenantId(), req.GetItemId()
+	}
+	v, err := s.store.RemoveCart(ctx, tenantID, itemID)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return cartReply(v), nil
+}
+
+// ---------------------------------------------------------------------------
+// 映射辅助
+
+// toProtoOrder 订单聚合 → 契约消息（时间 RFC3339，空时间留空串）。
+func toProtoOrder(o *Order) *mallv1.OrderReply {
+	items := make([]*mallv1.OrderItem, 0, len(o.Items))
+	for _, it := range o.Items {
+		items = append(items, &mallv1.OrderItem{
+			GoodsId:   it.GoodsID,
+			GoodsName: it.GoodsName,
+			GoodsType: int32(it.GoodsType),
+			PriceCent: it.PriceCent,
+			Qty:       int32(it.Qty),
+		})
+	}
+	return &mallv1.OrderReply{
+		OrderNo:      o.OrderNo,
+		Status:       o.Status,
+		AmountCent:   o.AmountCent,
+		Items:        items,
+		CreatedAt:    o.CreatedAt.Format(timeRFC3339),
+		ClosedReason: o.ClosedReason,
+	}
+}
+
+const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
+
+// cartReply 购物车视图 → 契约消息。
+func cartReply(v *CartView) *mallv1.CartReply {
+	items := make([]*mallv1.CartItem, 0, len(v.Items))
+	for _, l := range v.Items {
+		items = append(items, &mallv1.CartItem{
+			Id:    l.ID,
+			Goods: toProtoGoods(l.Goods),
+			Qty:   int32(l.Qty),
+		})
+	}
+	return &mallv1.CartReply{Items: items, TotalCent: v.TotalCent}
+}
+
+// toProtoGoods goods 行 → GoodsItem（契约 §3；cart 场景不含 detail，
+// recharge 附 token_estimate 营销展示，与其他服务同一口径）。
+func toProtoGoods(g goodsRow) *mallv1.GoodsItem {
+	item := &mallv1.GoodsItem{
+		Id:            g.ID,
+		Type:          int32(g.Type),
+		Name:          g.Name,
+		PriceCent:     g.PriceCent,
+		FaceValueCent: g.FaceValueCent,
+		BonusCent:     g.BonusCent,
+		Stock:         int32(g.Stock),
+		OnSale:        g.OnSale != 0,
+	}
+	if g.Type == typeRecharge {
+		item.TokenEstimate = (g.FaceValueCent + g.BonusCent) * tokenEstimateTokensPerCent
+	}
+	return item
+}
+
+// tokenEstimateTokensPerCent 营销展示口径：1 分 ≈ 1000 token（非入账依据）。
+const tokenEstimateTokensPerCent = 1000
+
+// toGRPCError mallerr → gRPC status。本服务可产生的契约码：
+// MALL_10005/20005/30007（400 类 → InvalidArgument）、
+// MALL_20001/30001（404 类 → NotFound）、
+// MALL_20002/20003/20004/30003（409 类 → FailedPrecondition），
+// 其余（含无码错误）一律 Internal。
+func toGRPCError(err error) error {
+	var me *mallerr.Error
+	if !errors.As(err, &me) {
+		return status.Error(codes.Internal, err.Error())
+	}
+	switch me.Code {
+	case mallerr.CodeInvalidParam,
+		mallerr.CodeGoodsQtyExceeded,
+		mallerr.CodeGoodsTypeNotAllowed:
+		return status.Error(codes.InvalidArgument, me.Msg)
+	case mallerr.CodeGoodsNotFound,
+		mallerr.CodeOrderNotFound:
+		return status.Error(codes.NotFound, me.Msg)
+	case mallerr.CodeGoodsOffSale,
+		mallerr.CodeOutOfStock,
+		mallerr.CodeCartRowsExceeded,
+		mallerr.CodeIdempotencyConflict,
+		mallerr.CodeOrderStateInvalid:
+		return status.Error(codes.FailedPrecondition, me.Msg)
+	default:
+		return status.Error(codes.Internal, me.Msg)
+	}
+}
