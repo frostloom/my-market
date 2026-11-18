@@ -246,16 +246,20 @@ func (x *ListOrdersReq) GetPage() *PageReq {
 // paid=false 表示 Provider 失败回调：payment_records 置 failed、订单停留 created。
 // tenant_id 供服务端重校验订单归属：与订单 tenant 不符 → MALL_30001
 // （与 GET /orders/{no} 同口径：不区分"不存在"与"非本人订单"）。
+// signature_verified 由 BFF 回调入口（/payments/callback 验签后）如实上报：
+// true=HTTP 回调已经 HMAC 验签（落库 signature_verified=1）；
+// false=内部/mock 受信通道（默认，落库 0）。审计要求按入口如实记录。
 type MarkPaidReq struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	OrderNo         string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
-	Provider        string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"` // mock | stripe
-	ProviderTradeNo string                 `protobuf:"bytes,3,opt,name=provider_trade_no,json=providerTradeNo,proto3" json:"provider_trade_no,omitempty"`
-	AmountCent      int64                  `protobuf:"varint,4,opt,name=amount_cent,json=amountCent,proto3" json:"amount_cent,omitempty"`
-	Paid            bool                   `protobuf:"varint,5,opt,name=paid,proto3" json:"paid,omitempty"`
-	TenantId        uint64                 `protobuf:"varint,6,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	OrderNo           string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
+	Provider          string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"` // mock | stripe
+	ProviderTradeNo   string                 `protobuf:"bytes,3,opt,name=provider_trade_no,json=providerTradeNo,proto3" json:"provider_trade_no,omitempty"`
+	AmountCent        int64                  `protobuf:"varint,4,opt,name=amount_cent,json=amountCent,proto3" json:"amount_cent,omitempty"`
+	Paid              bool                   `protobuf:"varint,5,opt,name=paid,proto3" json:"paid,omitempty"`
+	TenantId          uint64                 `protobuf:"varint,6,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	SignatureVerified bool                   `protobuf:"varint,7,opt,name=signature_verified,json=signatureVerified,proto3" json:"signature_verified,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *MarkPaidReq) Reset() {
@@ -328,6 +332,13 @@ func (x *MarkPaidReq) GetTenantId() uint64 {
 		return x.TenantId
 	}
 	return 0
+}
+
+func (x *MarkPaidReq) GetSignatureVerified() bool {
+	if x != nil {
+		return x.SignatureVerified
+	}
+	return false
 }
 
 type CancelOrderReq struct {
@@ -1088,7 +1099,7 @@ const file_order_proto_rawDesc = "" +
 	"\border_no\x18\x02 \x01(\tR\aorderNo\"R\n" +
 	"\rListOrdersReq\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\x04R\btenantId\x12$\n" +
-	"\x04page\x18\x02 \x01(\v2\x10.mall.v1.PageReqR\x04page\"\xc2\x01\n" +
+	"\x04page\x18\x02 \x01(\v2\x10.mall.v1.PageReqR\x04page\"\xf1\x01\n" +
 	"\vMarkPaidReq\x12\x19\n" +
 	"\border_no\x18\x01 \x01(\tR\aorderNo\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12*\n" +
@@ -1096,7 +1107,8 @@ const file_order_proto_rawDesc = "" +
 	"\vamount_cent\x18\x04 \x01(\x03R\n" +
 	"amountCent\x12\x12\n" +
 	"\x04paid\x18\x05 \x01(\bR\x04paid\x12\x1b\n" +
-	"\ttenant_id\x18\x06 \x01(\x04R\btenantId\"H\n" +
+	"\ttenant_id\x18\x06 \x01(\x04R\btenantId\x12-\n" +
+	"\x12signature_verified\x18\a \x01(\bR\x11signatureVerified\"H\n" +
 	"\x0eCancelOrderReq\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\x04R\btenantId\x12\x19\n" +
 	"\border_no\x18\x02 \x01(\tR\aorderNo\"H\n" +

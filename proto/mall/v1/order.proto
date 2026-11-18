@@ -67,6 +67,9 @@ message ListOrdersReq {
 // paid=false 表示 Provider 失败回调：payment_records 置 failed、订单停留 created。
 // tenant_id 供服务端重校验订单归属：与订单 tenant 不符 → MALL_30001
 // （与 GET /orders/{no} 同口径：不区分"不存在"与"非本人订单"）。
+// signature_verified 由 BFF 回调入口（/payments/callback 验签后）如实上报：
+// true=HTTP 回调已经 HMAC 验签（落库 signature_verified=1）；
+// false=内部/mock 受信通道（默认，落库 0）。审计要求按入口如实记录。
 message MarkPaidReq {
   string order_no = 1;
   string provider = 2; // mock | stripe
@@ -74,6 +77,7 @@ message MarkPaidReq {
   int64 amount_cent = 4;
   bool paid = 5;
   uint64 tenant_id = 6;
+  bool signature_verified = 7;
 }
 
 message CancelOrderReq {

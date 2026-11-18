@@ -81,9 +81,9 @@ func (s *orderServer) ListOrders(ctx context.Context, req *mallv1.ListOrdersReq)
 // paid=true 置 paid；paid=false 失败回调：payment_records 置 failed，
 // 订单停留 created（R0 台账裁定）。tenant_id 服务端重校验：订单不存在
 // 或不归属该租户 → MALL_30001（与 GetOrder 同口径，不泄漏存在性）。
-// 本入口为受信内部/mock 通道（不经 Verifier），Callback.SignatureVerified
-// 保持 false——payment_records.signature_verified 如实记 0；HTTP 回调入口
-// （MarkPaidFromCallback）验签后记 1。
+// signature_verified 由调用方如实上报（req 字段 7）：BFF 回调入口验签后
+// 置 true（流水记 1）；内部/mock 受信通道缺省 false（流水记 0）——payment_records
+// signature_verified 按入口如实落库，不虚报验签。
 func (s *orderServer) MarkPaid(ctx context.Context, req *mallv1.MarkPaidReq) (*mallv1.OrderReply, error) {
 	var tenantID uint64
 	var cb Callback
@@ -95,6 +95,9 @@ func (s *orderServer) MarkPaid(ctx context.Context, req *mallv1.MarkPaidReq) (*m
 			TradeNo:    req.GetProviderTradeNo(),
 			Paid:       req.GetPaid(),
 			AmountCent: req.GetAmountCent(),
+			// 调用方如实上报：BFF 回调入口验签通过后置 true（落流水 1），
+			// 内部/mock 受信通道缺省 false（落流水 0）——审计 Minor-4 同口径。
+			SignatureVerified: req.GetSignatureVerified(),
 		}
 	}
 	if _, err := s.store.GetOrder(ctx, tenantID, cb.OrderNo); err != nil {
