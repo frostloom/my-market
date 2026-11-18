@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 
@@ -174,8 +175,10 @@ func friendly(msg, def string) string {
 }
 
 // upstreamErr 网络层失败 → 5xxx（超时/不可达区分）。
+// errors.Is 匹配：http.Client 超时经 url.Error 包装，直等比较几乎永不命中；
+// 与 mw_errors.go 的 ctx 超时口径一致（超时 → MALL_50002 而非 50003）。
 func upstreamErr(err error) error {
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return mallerr.E(mallerr.CodeUpstreamTimeout, false, "上游超时，请重试")
 	}
 	return mallerr.E(mallerr.CodeUpstreamUnavailable, false, "账户服务不可达，请稍后重试")

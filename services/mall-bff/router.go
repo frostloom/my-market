@@ -82,6 +82,13 @@ func NewApp(cfg Config, goods GoodsClient, orders OrderClient, rdb *redis.Client
 		orders:   orders,
 		rdb:      rdb,
 	}
+	// 不信任任何代理头：gin 默认信任所有代理，X-Forwarded-For 可伪造——
+	// IP 限流键（ClientIP）轮换 XFF 即每请求新桶，限流形同虚设。置 nil 后
+	// ClientIP 回落 RemoteAddr（直连地址，不可伪造）。R3 进 K8s/Ingress 时
+	// 改为信任集群网段（engine.SetTrustedProxies([]string{"10.0.0.0/8"})）。
+	if err := a.engine.SetTrustedProxies(nil); err != nil {
+		log.Warn("SetTrustedProxies failed", "err", err)
+	}
 	// mock provider 自持（回调基址经闭包动态解析——测试可先起 httptest
 	// 服再改 a.cfg.CallbackSelfURL，与装配顺序解耦）。
 	a.provider = newMockProvider(func() string { return a.cfg.CallbackSelfURL },

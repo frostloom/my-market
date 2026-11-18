@@ -4,11 +4,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/frostloom/my-market/pkg/mallerr"
 )
 
 // TestAuth_InvalidToken_401_MALL10001：未携带 / 格式非法凭证 → 401 MALL_10001。
@@ -167,6 +172,16 @@ func TestLogout_ForwardsCookieAndShapes(t *testing.T) {
 	}
 	if body := strings.TrimSpace(rec.Body.String()); body != "{}" {
 		t.Fatalf("logout 响应 = %s, want {}", body)
+	}
+}
+
+// TestUpstreamErr_WrappedDeadlineIsTimeout（Fix Round 1 Minor-1）：http.Client
+// 超时经 url.Error 包装——errors.Is 须穿透识别为超时（MALL_50002），而非 50003。
+func TestUpstreamErr_WrappedDeadlineIsTimeout(t *testing.T) {
+	wrapped := fmt.Errorf(`Post "http://127.0.0.1:1/auth/register": %w`, context.DeadlineExceeded)
+	var me *mallerr.Error
+	if !errors.As(upstreamErr(wrapped), &me) || me.Code != mallerr.CodeUpstreamTimeout {
+		t.Fatalf("包装的超时应映射 MALL_50002, got %+v", me)
 	}
 }
 

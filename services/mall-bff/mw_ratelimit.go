@@ -17,7 +17,6 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -47,6 +46,20 @@ func ipRateLimitKey(c *gin.Context) (string, bool) {
 	return ip, true
 }
 
+// rateLimitScript 原子分钟桶：INCR；首个计数才设 60s 过期。
+// 单条 Lua 保证原子性——INCR/EXPIRE 两步分离时 EXPIRE 失败会让桶永不过期，
+// 该租户/IP 被永久 429（失效模式是硬锁而非漏限，评审 Fix Round 1）。
+// KEYS[1]=桶键；返回：计数（EXPIRE 失败时返回 -1，调用方 fail-open 放行）。
+var rateLimitScript = redis.NewScript(`
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then
+  if redis.call('PEXPIRE', KEYS[1], 60000) == 0 then
+    return -1
+  end
+end
+return n
+`)
+
 // rateLimitMiddleware 分钟桶限流。keyFn 产出桶身份；超限 → 429 MALL_10006。
 func rateLimitMiddleware(rdb *redis.Client, scope string, limit int, keyFn rateLimitKeyFn, log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -56,17 +69,14 @@ func rateLimitMiddleware(rdb *redis.Client, scope string, limit int, keyFn rateL
 			return
 		}
 		bucket := "mall:rl:" + scope + ":" + key
-		n, err := rdb.Incr(context.Background(), bucket).Result()
-		if err != nil {
-			log.Warn("ratelimit redis error, fail-open", "err", err)
+		n, err := rateLimitScript.Run(context.Background(), rdb, []string{bucket}).Int64()
+		if err != nil || n < 0 {
+			// Redis 故障 / 过期设置失败：fail-open（限流器故障不应打死主链路）。
+			if err != nil {
+				log.Warn("ratelimit redis error, fail-open", "err", err)
+			}
 			c.Next()
 			return
-		}
-		if n == 1 {
-			// 首次计数才设窗（固定 60s 窗口）；设失败只影响回收，不影响计数。
-			if err := rdb.Expire(context.Background(), bucket, time.Minute).Err(); err != nil {
-				log.Warn("ratelimit expire failed", "err", err)
-			}
 		}
 		if n > int64(limit) {
 			abortWith(c, mallerr.E(mallerr.CodeRateLimited, false, "请求过于频繁，请稍后重试"))

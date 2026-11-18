@@ -410,6 +410,37 @@ func TestRateLimit_120PerMinute_Then429_MALL10006(t *testing.T) {
 	}
 }
 
+// TestRateLimit_XFFNotTrusted（Fix Round 1 Important-1）：SetTrustedProxies(nil)
+// 后 ClientIP 回落 RemoteAddr——伪造/轮换 X-Forwarded-For 不产生新 IP 桶。
+// 前置：把 9.9.9.9 桶打满，随后带不同伪造 XFF 的请求仍 429（同一桶）。
+func TestRateLimit_XFFNotTrusted(t *testing.T) {
+	fx := newTestApp(t, nil)
+	// 借 register 端点的 IP 桶：RemoteAddr 固定，XFF 轮换。
+	fill := func(xff string) int {
+		req := httptest.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(`{"username":"u1","password":"password123"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "7.7.7.7:1111"
+		if xff != "" {
+			req.Header.Set("X-Forwarded-For", xff)
+		}
+		rec := httptest.NewRecorder()
+		fx.app.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	// 打满默认桶（120）：前 120 次（带轮换 XFF）全部 200，说明 XFF 未生效
+	for i := 1; i <= 120; i++ {
+		if code := fill(fmt.Sprintf("10.1.1.%d", i)); code != 200 {
+			t.Fatalf("轮换 XFF 第 %d 次: HTTP = %d, want 200（伪造 XFF 不应产生新桶）", i, code)
+		}
+	}
+	// 桶满后再来两个全新伪造 XFF：仍命中同一 RemoteAddr 桶 → 429
+	for _, xff := range []string{"10.9.9.1", "10.9.9.2"} {
+		if code := fill(xff); code != 429 {
+			t.Fatalf("伪造 XFF %q: HTTP = %d, want 429（应与前面同桶）", xff, code)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 3. TestOrderAccess_TenantIsolation（Review Focus #5：他租户订单 → 404 MALL_30001
 //    经 FromGRPC 载体还原；同租户 → 200）
