@@ -253,18 +253,22 @@ func cartReply(v *CartView) *mallv1.CartReply {
 	return &mallv1.CartReply{Items: items, TotalCent: v.TotalCent}
 }
 
-// toProtoGoods goods 行 → GoodsItem（契约 §3；cart 场景不含 detail，
-// recharge 附 token_estimate 营销展示，与其他服务同一口径）。
+// toProtoGoods goods 行 → GoodsItem（契约 §3 全形状；cart 场景不含 detail，
+// recharge 附 token_estimate 营销展示，与 mall-goods 侧同一口径）。
 func toProtoGoods(g goodsRow) *mallv1.GoodsItem {
 	item := &mallv1.GoodsItem{
 		Id:            g.ID,
 		Type:          int32(g.Type),
 		Name:          g.Name,
+		Subtitle:      g.Subtitle,
 		PriceCent:     g.PriceCent,
+		OrigPriceCent: g.OrigPriceCent,
 		FaceValueCent: g.FaceValueCent,
 		BonusCent:     g.BonusCent,
+		ImageUrl:      g.ImageURL,
 		Stock:         int32(g.Stock),
 		OnSale:        g.OnSale != 0,
+		RefPlanId:     g.RefPlanID,
 		CategoryId:    g.CategoryID,
 		Limited:       g.Limited != 0,
 	}

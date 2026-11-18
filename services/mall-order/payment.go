@@ -8,6 +8,8 @@
 //	条件更新 created→paid + INSERT fulfillment_tasks（行级 pending，
 //	uk_order_line 幂等）→ COMMIT。
 //	paid=false 失败回调：仅落 failed 流水，订单停留 created（R0 台账裁定）。
+//	paid 回调金额 ≠ 订单金额：拒付——落 failed 流水（回调金额入 amount_cent、
+//	订单金额入审计载荷），订单停留 created（sequences §1 三分支之三）。
 //	订单已 paid 又来 paid 回调：只补流水、不重复投递履约（幂等 200）。
 //
 // 验签：HTTP 回调路径经 Verifier（HMAC-SHA256 占位）验签后才进 MarkPaidTx；
@@ -162,6 +164,14 @@ func (s *Store) MarkPaidFromCallback(ctx context.Context, payload []byte, sig st
 	return s.getOrderByNo(ctx, cb.OrderNo)
 }
 
+// mismatchPayload 错额 paid 回调的审计载荷：payment_records.amount_cent 单列
+// 记回调金额，订单金额补进 callback_payload（sequences §1 金额不匹配分支的
+// 对账依据；内嵌 Callback 保持回调原文平铺）。
+type mismatchPayload struct {
+	Callback
+	OrderAmountCent int64 `json:"order_amount_cent"`
+}
+
 // MarkPaidTx 回调落账事务（语义见包注释）。幂等依据：
 // payment_records (order_no, provider, provider_trade_no) + 订单状态条件更新。
 func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
@@ -213,6 +223,32 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 			}
 			if err := tx.Create(&rec).Error; err != nil {
 				return fmt.Errorf("mall-order: insert failed record %s: %w", cb.OrderNo, err)
+			}
+			return nil
+		}
+
+		// 2.5) 金额校验（sequences §1 三分支）：paid 回调金额 ≠ 订单金额 → 拒付——
+		//      落 failed 流水（amount_cent 记回调金额，订单金额补进审计载荷），
+		//      订单停留 created，返回 nil（回调被受理但不置 paid，对 HTTP 回调 200）。
+		//      已有同 trade_no 流水（必为 failed，paid 已被上方幂等分支拦截）：
+		//      错额重放幂等 no-op，不再重复落流水；恢复须以正确金额重发，
+		//      走下方 failed 升级 paid / 新号补 paid 流水的既有路径。
+		if cb.Paid && cb.AmountCent != row.AmountCent {
+			if hasExisting {
+				return nil
+			}
+			pj, merr := json.Marshal(mismatchPayload{Callback: cb, OrderAmountCent: row.AmountCent})
+			if merr != nil {
+				pj = payloadJSON // Callback 全为可序列化标量，不可达；防御性回退回调原文
+			}
+			rec := paymentRecordRow{
+				OrderNo: cb.OrderNo, Provider: cb.Provider, ProviderTradeNo: cb.TradeNo,
+				Status: paymentStatusFailed, AmountCent: cb.AmountCent,
+				CallbackPayload:   strPtr(string(pj)),
+				SignatureVerified: sigFlag(cb.SignatureVerified),
+			}
+			if err := tx.Create(&rec).Error; err != nil {
+				return fmt.Errorf("mall-order: insert mismatch record %s: %w", cb.OrderNo, err)
 			}
 			return nil
 		}

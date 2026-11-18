@@ -19,17 +19,19 @@
 
 ## R1 商城切片（goods/cart/order/bff）
 
-- [ ] `deploy/compose` 新增 `--profile mall`（bff 18090 / goods 9111 / order 9112）一键起
-- [ ] market 库按 db-schema.sql 建表（6 品类种子存在）
-- [ ] GET /categories、/goods 分页（游标翻页到底返回 next_cursor=null）、/goods/{id} 通过契约（api-contract §3）
-- [ ] 购物车 upsert/改量/删除 + 20 行/qty≤99 上限生效（超限返回 MALL_20004/20005）
-- [ ] general 下单：同库直扣库存；库存不足事务回滚返回 MALL_20003（`SELECT stock` 不变验证）
-- [ ] 幂等：同 Idempotency-Key 同 payload 重发返回原单；异 payload 返回 MALL_30003
-- [ ] 支付：mock Provider 异步回调 → paid + payment_records + fulfillment_tasks 同事务（`SELECT` 三表一致）；重复回调幂等
-- [ ] 履约：general 行 worker 执行后 fulfilled；人为 kill worker 重启后任务续跑（outbox 生效）
-- [ ] 超时：造 31 分钟前 created 订单 → 扫描后 closed(timeout) + 库存回补；主动取消同理 closed(user)
-- [ ] 错误模型：全部非 2xx 返回 `{error, code, retryable}`，码表与 api-contract §1 一致
-- [ ] mall-bff 鉴权：无 token 401（MALL_10001）；过期 token 401（MALL_10002）；per-tenant 120 req/min 触发 429（MALL_10006）
+> 2026-11-18 回填：R1 已完成（11/11 勾选；5 项全实测——smoke-r1.sh 两遍 PASS + SQL 三表实证，6 项部分实测——取消/上限/超时/过期 token 等分支引用 T3-T6 单测报告证据；逐项核对表见 .superpowers/sdd/2026-11-18-R1-商城垂直切片/task-7-report.md）。
+
+- [x] `deploy/compose` 新增 `--profile mall`（bff 18090 / goods 9111 / order 9112）一键起
+- [x] market 库按 db-schema.sql 建表（6 品类种子存在）
+- [x] GET /categories、/goods 分页（游标翻页到底返回 next_cursor=null）、/goods/{id} 通过契约（api-contract §3）
+- [x] 购物车 upsert/改量/删除 + 20 行/qty≤99 上限生效（超限返回 MALL_20004/20005）
+- [x] general 下单：同库直扣库存；库存不足事务回滚返回 MALL_20003（`SELECT stock` 不变验证）
+- [x] 幂等：同 Idempotency-Key 同 payload 重发返回原单；异 payload 返回 MALL_30003
+- [x] 支付：mock Provider 异步回调 → paid + payment_records + fulfillment_tasks 同事务（`SELECT` 三表一致）；重复回调幂等
+- [x] 履约：general 行 worker 执行后 fulfilled；人为 kill worker 重启后任务续跑（outbox 生效）
+- [x] 超时：造 31 分钟前 created 订单 → 扫描后 closed(timeout) + 库存回补；主动取消同理 closed(user)
+- [x] 错误模型：全部非 2xx 返回 `{error, code, retryable}`，码表与 api-contract §1 一致
+- [x] mall-bff 鉴权：无 token 401（MALL_10001）；过期 token 401（MALL_10002）；per-tenant 120 req/min 触发 429（MALL_10006）
 
 ## R2 充值闭环
 

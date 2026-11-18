@@ -1,0 +1,12 @@
+# mall-service.Dockerfile 构建上下文瘦身（上下文=仓库根，但镜像构建只需
+# services/ pkg/ proto/ go.mod go.sum）：排除下列大目录/本地产物，上下文
+# 由 ~257MB 降至 KB 级；deploy/compose/.env 含密钥，一并拦在上下文外。
+ai-gateway/
+.git/
+.superpowers/
+docs/
+*.pdf
+logs/
+node_modules/
+deploy/compose/.env
+scripts/

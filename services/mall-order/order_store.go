@@ -3,6 +3,7 @@
 // 错误一律携带契约码（pkg/mallerr），由 server.go 映射 gRPC status。
 //
 // CreateCartOrder 事务语义（ADR-009 同库直扣）：
+//
 //	BEGIN → 校验商品（on_sale=1 且 type∈{1,3}）→ 逐行条件扣库存
 //	（UPDATE goods SET stock=stock-? WHERE id=? AND stock>=?，0 行 → MALL_20003
 //	整体回滚）→ INSERT mall_orders(kind=2) + mall_order_items（行号 1..n、
@@ -58,35 +59,41 @@ const mysqlErrDupEntry = 1062
 
 // orderRow mall_orders 表行（db-schema.sql）。
 type orderRow struct {
-	ID           uint64    `gorm:"column:id"`
-	OrderNo      string    `gorm:"column:order_no"`
-	TenantID     uint64    `gorm:"column:tenant_id"`
-	Status       int8      `gorm:"column:status"` // 1 created 2 paid 3 fulfilled 4 refunded 5 closed
-	AmountCent   int64     `gorm:"column:amount_cent"`
-	IdemKey      string    `gorm:"column:idem_key"`
-	Kind         int8      `gorm:"column:kind"` // 1 recharge直购 2 cart混合 3 seckill
-	ClosedReason int8      `gorm:"column:closed_reason"`
+	ID           uint64     `gorm:"column:id"`
+	OrderNo      string     `gorm:"column:order_no"`
+	TenantID     uint64     `gorm:"column:tenant_id"`
+	Status       int8       `gorm:"column:status"` // 1 created 2 paid 3 fulfilled 4 refunded 5 closed
+	AmountCent   int64      `gorm:"column:amount_cent"`
+	IdemKey      string     `gorm:"column:idem_key"`
+	Kind         int8       `gorm:"column:kind"` // 1 recharge直购 2 cart混合 3 seckill
+	ClosedReason int8       `gorm:"column:closed_reason"`
 	PaidAt       *time.Time `gorm:"column:paid_at"`
 	FulfilledAt  *time.Time `gorm:"column:fulfilled_at"`
 	ClosedAt     *time.Time `gorm:"column:closed_at"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at"`
 }
 
 func (orderRow) TableName() string { return "mall_orders" }
 
 // goodsRow goods 表行（db-schema.sql；本服务只在事务内条件更新 stock）。
+// 字段全集对齐 mall-goods 侧同名行（cart 视图 goods 保真——api-contract §4
+// 引用 §3 全形状），本服务不消费 detail 富文本故不载（*string NULL 列）。
 type goodsRow struct {
-	ID            uint64    `gorm:"column:id"`
-	Type          int8      `gorm:"column:type"`
-	CategoryID    uint64    `gorm:"column:category_id"`
-	Name          string    `gorm:"column:name"`
-	PriceCent     int64     `gorm:"column:price_cent"`
-	FaceValueCent int64     `gorm:"column:face_value_cent"`
-	BonusCent     int64     `gorm:"column:bonus_cent"`
-	Stock         int       `gorm:"column:stock"`
-	Limited       int8      `gorm:"column:limited"`
-	OnSale        int8      `gorm:"column:on_sale"`
+	ID            uint64 `gorm:"column:id"`
+	Type          int8   `gorm:"column:type"`
+	CategoryID    uint64 `gorm:"column:category_id"`
+	Name          string `gorm:"column:name"`
+	Subtitle      string `gorm:"column:subtitle"`
+	PriceCent     int64  `gorm:"column:price_cent"`
+	OrigPriceCent int64  `gorm:"column:orig_price_cent"`
+	FaceValueCent int64  `gorm:"column:face_value_cent"`
+	BonusCent     int64  `gorm:"column:bonus_cent"`
+	ImageURL      string `gorm:"column:image_url"`
+	Stock         int    `gorm:"column:stock"`
+	Limited       int8   `gorm:"column:limited"`
+	RefPlanID     uint64 `gorm:"column:ref_plan_id"`
+	OnSale        int8   `gorm:"column:on_sale"`
 }
 
 func (goodsRow) TableName() string { return "goods" }
@@ -133,11 +140,11 @@ type Line struct {
 
 // OrderItem 订单行聚合（快照 + 商品名）。
 type OrderItem struct {
-	LineNo        int32  // 行号从 1；ref_id = order_no:line_no
-	Type          int8   // 1 ship 2 credit 3 subscribe
+	LineNo        int32 // 行号从 1；ref_id = order_no:line_no
+	Type          int8  // 1 ship 2 credit 3 subscribe
 	GoodsID       uint64
 	GoodsName     string
-	GoodsType     int8   // 1 general 2 recharge 3 subscription
+	GoodsType     int8 // 1 general 2 recharge 3 subscription
 	Qty           int
 	PriceCent     int64 // 下单时行价格快照
 	FaceValueCent int64

@@ -129,7 +129,11 @@ func handleCreateOrder(orders OrderClient) gin.HandlerFunc {
 				abortWith(c, mallerr.E(mallerr.CodeInvalidParam, false, "cart 下单须 from_cart=true"))
 				return
 			}
-			lines, err = cartLines(c.Request.Context(), orders, tenantID(c))
+			// 与其余下游调用同口径：cartLines 也吃 rpcTimeout（终审 M-3），
+			// 不裸用请求 ctx——下游卡死时 5s 内以 MALL_50002 出错而非挂满连接。
+			lctx, lcancel := context.WithTimeout(c.Request.Context(), rpcTimeout)
+			defer lcancel()
+			lines, err = cartLines(lctx, orders, tenantID(c))
 			if err != nil {
 				abortWith(c, err)
 				return

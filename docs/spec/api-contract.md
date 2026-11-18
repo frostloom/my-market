@@ -37,7 +37,7 @@
 
 | 操作 | 机制 |
 |---|---|
-| 下单 | `Idempotency-Key` 头必填；作用域 `(tenant_id, key)`；同 key 同 payload 返回原单（200），不同 payload 拒绝 MALL_30003 |
+| 下单 | `Idempotency-Key` 头必填；作用域 `(tenant_id, key)`；同 key 同 payload 返回原单（201，与首次一致——重放响应与首次创建同形），不同 payload 拒绝 MALL_30003 |
 | 支付回调 | Provider 回调天然重试，`payment_records` + 订单状态条件更新幂等；重复回调返回当前状态 200 |
 | Credit/冲退 | billing `uk_ref(ref_type, ref_id)` 唯一索引，重复 no-op |
 | 秒杀抢购 | `(activity_id, tenant_id)` 唯一索引 |
@@ -100,7 +100,7 @@
 
 ### GET /goods?category_id=&cursor=&page_size=
 200 `{"items":[Goods], "next_cursor":"...|null", "has_more":bool}`
-`Goods`：`{"id":..,"type":"general|recharge|subscription","name":"..","subtitle":"..","price_cent":..,"orig_price_cent":..,"face_value_cent":..,"bonus_cent":..,"image_url":"..","stock":..,"ref_plan_id":..,"on_sale":true}`（recharge 附 `token_estimate`（按模型价换算的营销展示，不作入账依据））
+`Goods`：`{"id":..,"type":"general|recharge|subscription","name":"..","subtitle":"..","price_cent":..,"orig_price_cent":..,"face_value_cent":..,"bonus_cent":..,"image_url":"..","stock":..,"ref_plan_id":..,"on_sale":true,"category_id":..,"limited":bool}`（recharge 附 `token_estimate`（按模型价换算的营销展示，不作入账依据））
 错误：MALL_20006。
 
 ### GET /goods/{id}

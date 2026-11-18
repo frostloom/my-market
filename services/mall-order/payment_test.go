@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
@@ -235,4 +237,81 @@ func TestMarkPaidTx_VerifyFail_StaysCreated(t *testing.T) {
 func mustSign(secret []byte, cb Callback) string {
 	_, sig := SignCallback(secret, cb)
 	return sig
+}
+
+// ---------------------------------------------------------------------------
+// 4. TestMarkPaidTx_AmountMismatchFailsPayment（终审 I-1 / sequences §1 三分支）
+// 首 paid 回调金额与订单金额不一致 → 拒付：受理不报错（返回 nil），落 failed
+// 流水（amount_cent=回调金额、审计载荷含订单金额），订单停留 created、不投履约；
+// 随后同 trade_no 以正确金额重发 → failed 升级 paid（恢复路径不被污染）。
+func TestMarkPaidTx_AmountMismatchFailsPayment(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "pay-mismatch", 113, 1)
+
+	// 首回调金额错误（订单金额 +1 分）→ 受理但拒付（nil，非错误）
+	bad := Callback{OrderNo: ord.OrderNo, Provider: "mock", TradeNo: "T-mismatch-1",
+		Paid: true, AmountCent: ord.AmountCent + 1}
+	if err := s.MarkPaidTx(ctx, bad); err != nil {
+		t.Fatalf("错额回调应受理不报错（返回 nil），got: %v", err)
+	}
+
+	status, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo)
+	if status != "created" {
+		t.Fatalf("订单 status = %s，want 停留 created（错额拒付）", status)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1", got)
+	}
+	recStatus, recAmount := paymentRecord(t, s, ord.OrderNo)
+	if recStatus != 3 || recAmount != ord.AmountCent+1 {
+		t.Fatalf("流水 = (status=%d, amount=%d)，want failed(3) 且记回调金额 %d",
+			recStatus, recAmount, ord.AmountCent+1)
+	}
+	// 审计载荷：回调金额与订单金额均在案（amount_cent 单列记回调金额，订单金额入 payload；
+	// MySQL JSON 列回读带空格规范化，先去空格再比对键值）
+	var payload string
+	if err := s.db.Raw("SELECT callback_payload FROM payment_records WHERE order_no = ?", ord.OrderNo).
+		Scan(&payload).Error; err != nil || payload == "" {
+		t.Fatalf("read callback_payload = (%q, %v)，要求非空", payload, err)
+	}
+	compact := strings.ReplaceAll(payload, " ", "")
+	if !strings.Contains(compact, fmt.Sprintf(`"AmountCent":%d`, ord.AmountCent+1)) ||
+		!strings.Contains(compact, fmt.Sprintf(`"order_amount_cent":%d`, ord.AmountCent)) {
+		t.Fatalf("错额审计载荷缺回调/订单金额：%s", payload)
+	}
+	if got := len(taskRowsOf(t, s, ord.OrderNo)); got != 0 {
+		t.Fatalf("fulfillment_tasks = %d 行，want 0（拒付不投递履约）", got)
+	}
+
+	// 恢复：同 trade_no 正确金额重发 → failed 升级 paid，订单置 paid 并投递履约
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: "T-mismatch-1",
+		Paid: true, AmountCent: ord.AmountCent,
+	}); err != nil {
+		t.Fatalf("正确金额恢复回调: %v", err)
+	}
+	status, _ = orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo)
+	if status != "paid" {
+		t.Fatalf("恢复回调后订单 status = %s，want paid", status)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1（同号升级不新增流水）", got)
+	}
+	recStatus, recAmount = paymentRecord(t, s, ord.OrderNo)
+	if recStatus != 2 || recAmount != ord.AmountCent {
+		t.Fatalf("恢复后流水 = (status=%d, amount=%d)，want paid(2) 且金额=%d",
+			recStatus, recAmount, ord.AmountCent)
+	}
+	tasks := taskRowsOf(t, s, ord.OrderNo)
+	if len(tasks) != len(ord.Items) {
+		t.Fatalf("恢复后 fulfillment_tasks = %d 行，want %d（正常投递）", len(tasks), len(ord.Items))
+	}
+	for i, task := range tasks {
+		if task.Status != 1 {
+			t.Fatalf("任务行 %d status = %d，want pending(1)", i, task.Status)
+		}
+	}
 }
