@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
 )
@@ -124,4 +126,73 @@ func TestCart_UpsertMergeAndLimits(t *testing.T) {
 	}
 	_, err = s.AddCart(ctx, testTenantC, 126, 1)
 	assertMallCode(t, err, mallerr.CodeCartRowsExceeded)
+}
+
+// ---------------------------------------------------------------------------
+// 9. TestAddCart_RejectsSeckillGoods（Fix Round 1）
+// 契约 §4「recharge/秒杀商品返回 MALL_30007」：存在 status=2（上线）
+// seckill_activities 的商品不可加购；同一商品无活动（或仅草稿 status=1）
+// 时加购正常（正反两断言）。活动行在 t.Cleanup 删除。
+func TestAddCart_RejectsSeckillGoods(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantC)
+
+	// 正断言（无活动）：同商品加购正常
+	v := mustAddCart(t, s, testTenantC, 113, 1)
+	if q, _ := cartQtyOf(t, v, 113); q != 1 {
+		t.Fatalf("无活动时加购 qty = %d，want 1", q)
+	}
+
+	// 反断言（上线活动 status=2）：加购拒 MALL_30007（合并路径同样被拦）
+	insertSeckillActivity(t, s, 113, 2) // 行由 t.Cleanup 删除
+	if _, err := s.AddCart(ctx, testTenantC, 113, 1); err == nil {
+		t.Fatalf("上线秒杀活动商品加购应被拒")
+	} else {
+		assertMallCode(t, err, mallerr.CodeGoodsTypeNotAllowed)
+	}
+
+	// 语义边界（与实现注释口径一致）：草稿活动 status=1 不拒
+	_ = insertSeckillActivity(t, s, 114, 1)
+	mustAddCart(t, s, testTenantC, 114, 1)
+}
+
+// seckillActivityRow 测试专用最小行（仅用于插桩活动，生产代码只 Count）。
+type seckillActivityRow struct {
+	ID               uint64    `gorm:"column:id"`
+	GoodsID          uint64    `gorm:"column:goods_id"`
+	SeckillPriceCent int64     `gorm:"column:seckill_price_cent"`
+	TotalStock       int32     `gorm:"column:total_stock"`
+	SoldStock        int32     `gorm:"column:sold_stock"`
+	RedisKey         string    `gorm:"column:redis_key"`
+	StartAt          time.Time `gorm:"column:start_at"`
+	EndAt            time.Time `gorm:"column:end_at"`
+	Status           int8      `gorm:"column:status"`
+}
+
+func (seckillActivityRow) TableName() string { return "seckill_activities" }
+
+// insertSeckillActivity 插入一条秒杀活动行并登记 cleanup 删除，返回其 id。
+func insertSeckillActivity(t *testing.T, s *Store, goodsID uint64, status int8) uint64 {
+	t.Helper()
+	now := time.Now()
+	row := seckillActivityRow{
+		GoodsID:          goodsID,
+		SeckillPriceCent: 9900,
+		TotalStock:       10,
+		RedisKey:         fmt.Sprintf("t4-test-%d-%d", goodsID, now.UnixNano()),
+		StartAt:          now,
+		EndAt:            now.Add(24 * time.Hour),
+		Status:           status,
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		t.Fatalf("insert seckill_activity(goods=%d, status=%d): %v", goodsID, status, err)
+	}
+	id := row.ID
+	t.Cleanup(func() {
+		if err := s.db.Exec("DELETE FROM seckill_activities WHERE id = ?", id).Error; err != nil {
+			t.Fatalf("cleanup seckill_activity id=%d: %v", id, err)
+		}
+	})
+	return id
 }

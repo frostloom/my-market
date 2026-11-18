@@ -55,7 +55,8 @@ func (s *Store) GetCart(ctx context.Context, tenantID uint64) (*CartView, error)
 
 // AddCart 加购（契约 POST /cart/items）：upsert 同商品合并 qty。
 // 校验：qty 1..99（MALL_20005）、商品存在（MALL_20001）、在售（MALL_20002）、
-// 类型可购 type∈{1,3}（recharge 等拒 MALL_30007）、行数上限 20（MALL_20004）。
+// 类型可购 type∈{1,3} 且非秒杀活动商品（recharge/秒杀拒 MALL_30007）、
+// 行数上限 20（MALL_20004）。
 func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qty int) (*CartView, error) {
 	if qty < cartQtyMin || qty > cartQtyMax {
 		return nil, mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
@@ -71,6 +72,19 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 	if g.Type != typeGeneral && g.Type != typeSubscription {
 		return nil, mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
 			"商品 %d 不可加购（recharge 仅直购）", goodsID)
+	}
+	// 秒杀商品不可加购（契约 §4「recharge/秒杀商品返回 MALL_30007」）：
+	// 存在 status=2（上线）活动的商品一律拒绝，不限时间窗——上线即拒，
+	// 避免加购后结算时点落入活动窗口造成双通道成交；草稿(1)/结束(3)不拒。
+	var seckillN int64
+	if err := s.db.WithContext(ctx).Table("seckill_activities").
+		Where("goods_id = ? AND status = 2", goodsID).
+		Count(&seckillN).Error; err != nil {
+		return nil, fmt.Errorf("mall-order: check seckill activity: %w", err)
+	}
+	if seckillN > 0 {
+		return nil, mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
+			"商品 %d 为秒杀商品，不可加入购物车", goodsID)
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

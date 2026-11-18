@@ -238,6 +238,8 @@ func (s *Store) CreateCartOrder(ctx context.Context, tenantID uint64, idemKey st
 		if !errors.As(err, &me) || me.Number != mysqlErrDupEntry {
 			return nil, err
 		}
+		// 键名分流耦合 MySQL 1062 报文措辞（"for key '<table>.<索引名>'"）：
+		// 索引改名/报文格式变更会静默落入 default 分支（MALL_50001），需同步此处。
 		switch {
 		case strings.Contains(me.Message, "uk_tenant_idem"):
 			// 幂等：读回原单比较 payload（同 → 返回原单；异 → MALL_30003）。
