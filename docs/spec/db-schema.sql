@@ -40,7 +40,8 @@ CREATE TABLE `goods` (
   `updated_at`      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   KEY `idx_category` (`category_id`, `id`),
-  KEY `idx_type_sale` (`type`, `on_sale`)
+  KEY `idx_type_sale` (`type`, `on_sale`),
+  KEY `idx_on_sale_created` (`on_sale`, `created_at`, `id`) COMMENT '在售键集分页 ORDER BY 下推'
 ) ENGINE=InnoDB COMMENT='商品（general/recharge/subscription）';
 
 -- ---------- 购物车 ----------
