@@ -1,0 +1,37 @@
+# Frozen evidence must retain exact bytes across Windows and Unix checkouts.
+eval/paired-pilots/2026-10-17-jev-acceptance-v1/** -text
+eval/paired-pilots/2026-10-17-four-task-retest-v1/** -text
+eval/jev-offline-readiness/** -text
+eval/baselines/2026-09-29-v1-v2/** -text
+eval/experiments/2026-10-08/** -text
+eval/experiments/2026-10-08-deepseek-flash/** -text
+eval/experiments/2026-10-08-jev-fast-path/** -text
+eval/behavior-review/** -text
+eval/annotations/2026-10-09-intent-contract-v1/** -text
+eval/reviews/2026-10-09-intent-offline-audit/** -text
+eval/contracts/** -text
+eval/intent-suite/** -text
+eval/task-suites/2026-10-09-boundary-dev-v1/** -text
+web/scripts/gen-intent-suite.mjs -text
+scripts/customer-service-contract.py -text
+scripts/summarize-offline-intent-audit.py -text
+eval/task-suites/2026-10-11-read-fixtures-dev-v1/** -text
+eval/task-definitions/2026-10-12-full-dev-v1/** -text
+eval/runtime-profiles/2026-10-13-six-profiles-v1/** -text
+eval/code-snapshots/** -text
+eval/conversation-regressions/** -text
+eval/conversation-regressions/2026-10-13-agent-local-v1/events.jsonl whitespace=cr-at-eol
+eval/reviews/2026-10-13-answer-evidence-v1/** -text
+scripts/audit-historical-answer-evidence.py -text
+eval/paired-pilots/2026-10-13-dev-v1/** -text
+eval/paired-pilots/2026-10-14-four-task-v1/** -text whitespace=cr-at-eol
+eval/paired-pilots/2026-10-14-full-preflight-v1/** -text
+scripts/prepare-full-customer-pilot.py -text
+eval/paired-pilots/2026-10-15-langfuse-local-v1/** -text
+scripts/langfuse-eval.py -text
+scripts/prepare-observed-customer-pilot.py -text
+eval/paired-pilots/2026-10-15-observed-preflight-v2/** -text
+eval/paired-pilots/2026-10-15-langfuse-content-scores-v1/** -text
+eval/langfuse-workbench/2026-10-15-v1/** -text whitespace=cr-at-eol
+eval/paired-pilots/2026-10-16-langfuse-workbench-preflight-v3/** -text whitespace=cr-at-eol
+scripts/langfuse-workbench.py -text whitespace=cr-at-eol

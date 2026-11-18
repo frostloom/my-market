@@ -1,0 +1,20 @@
+# 环境变量与密钥（example 模板保留入库）
+.env*
+!*.env.example
+!*.example
+
+# 本流程工作区
+.superpowers/
+
+# 运行期日志
+logs/
+*.log
+
+# 系统文件
+.DS_Store
+
+# 依赖与构建缓存
+node_modules/
+
+# 本地 compose 覆盖配置
+deploy/compose/.env

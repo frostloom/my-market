@@ -1,0 +1,53 @@
+# ¥105预算与16前置claim的v3完整范围
+
+> 使用writing-plans制定、executing-plans内联执行、test-driven-development逐单元验证。用户已明确授权自主推进和模型请求，不再逐scope询问。
+
+目标为新的完整3660对/7320臂/11772轮，知识两臂off，1851边界另列。只增父额度与历史停止证明，不修改客服、任务或原超时/重试规则。旧v1/v2证据不可改写。
+
+## Task 1：离线范围与父预算
+
+文件：window_scope.go、window_scope_v3.go及测试。
+
+- 反例先证明当前不接受v3。
+- v3绑定新的停止基线SHA和精确用户预算批准SHA d5062e6f39f9ae7c9a8461121f9ba907c798100d7a5428af72da459595d2d554。
+- 父105000000/1000000µ单位；永久33395934/259511；未分配71604066/740489。预算尾差不自动授权其他实验。
+- 单个未知请求额外风险2023424/65另留，不重复计入永久claim，也不把它当可执行cap。范围caps必须在扣除该风险后满足两币种各自上限。
+- 复用固定排程推导，保留v1原上限；v3扣风险后的两上限均低于v1，故不引入可变budget推导器，另做更严格预算校验，不能改旧JSON或v2结果。
+- 覆盖完整任务、各币种边界/越界、负数/溢出、缺失或错误批准、跨版本字段、缺题/乱序，以及legacy实际入口拒绝。此单元只离线，无claim能力。
+
+## Task 2：具体只读历史证明
+
+文件：新window_stopped_v2_evidence.go/bundle.go及测试。
+
+- 原9claim+首次停止claim+v2六claim，共16；原基线加载器继续原100+1验证，不能全局改历史常量。
+- 新descriptor绑定原两个根、预算批准以及v2固定manifest/terminal/startup和六组claim/summary/receipt/payload/journal SHA。按嵌套manifest核验334记录、832请求及831完整响应，不硬编码每个正文SHA。
+- 先核验命名空间，现有.lock只读独占，校验精确inventory，拒绝第七claim/新窗口/额外未计请求、symlink、缺失和篡改；锁前后检查。
+- 推导809/204累计尝试、33395934/259511永久额及正确remaining；原model hold74752和JEV hold2688保持，不补结算，不称已知账单。预算未知责任需验证配置包络风险依据。
+- 只有具体文件证明可构造actual入口，JSON不能注入接口或测试替身；每次claim前新读。新session/campaign须与两个旧根分离。
+
+## Task 3：实际v3接线与冻结
+
+- readiness/schema/campaign/claim新的v3分支，保留旧只读验证；当前Open已拒绝v1/v2，不能删除该消费边界。
+- 新claim按验证过的105父额而非硬编码100计算，禁止续旧scope；原131窗口caps与完整排程不缩减。
+- 全Handler替身与失败路径、完整精确归档Go20分钟、内容/评分适配器、价格与包络/来源/签名、零推理接收端读回以及独立最终审查后再冻结并执行。
+- 可用仅绑定自有进程的caffeinate避免idle sleep，不永久改电源配置；不把它当历史JEV故障修复。
+
+## Execution ledger / review focus
+
+2026-10-28设计判断：只做新版本分支，不能把105写回历史100范围；不因采集质量负例追加旧付费范围。原用户预算批准和既有自主执行偏好为依据。
+
+重点：不能以任意base或自报JSON替代16claim证明；遗漏已消耗窗口、重复释放预留、假设unknown免费、跨币种补足、扩大预算尾差用途、旧入口绕过或无测试批量改schema均为阻断问题。
+
+2026-10-28 Task1：原不支持v3的语义反例RED，增加离线版本分支后GREEN。新旧范围41项race通过58.731秒、stderr0；私密overlay验证原131窗caps/3660对排程逐值相同，父包络103841020/964604。Task2/3尚未实现，不称实际ready。
+
+Ruling: 删除原计划的通用budget推导器，直接复用v1固定上限后收紧v3上限——v3扣风险后69580642/740424均小于原v1上限，不需要放宽底层接口；错误代价为若将来预算/风险改变需显式版本修改，当前不影响完整范围。
+
+独立v3_scope_review静态复核无确认P1/P2；其默认SDK27链接不兼容，测试未执行成功，不计为通过。主代理固定SDK26.5的实际测试证据另列，保留独立环境失败限制。
+
+Task1验证补充：旧campaign/停止证明/actual拒绝和scope组合race 270项通过473.957秒，失败/跳过0，stderr0。Task2/3与全Go门槛仍pending。
+
+2026-10-28 Task2具体读取器：38固定顶层SHA、旧具体first proof前后读回、只读原锁、嵌套334记录/832请求/831完整响应/1不可用响应、原目录精确inventory与16claim预算推导已通过原件正例及副本负例；35项race通过67.966秒、stderr0，3705原文件重新SHA一致。原件合法null误用readiness非空规则已定位并以独立record decoder RED→GREEN修正，readiness规则不变。独立审查无确认P1/P2，公开StoppedV2测试独立退出0/2.394秒，首次cache权限setup失败保留；Task3接线和完整全Go仍未完成。
+
+Ruling: 不声称跨两个旧目录获得事务原子快照；每个原owner使用自身现有只读锁、固定原始SHA及身份检查，第一具体proof在第二bundle前后重读。原始owner均有固定终止证据，历史字节不变，下一claim仍重新验证。
+
+2026-10-28 Task3接线单元：candidate readiness按匹配schema2/3加载各自原具体proof；Open仍仅v3且settings前fresh proof；v3工厂只接受具体16claim文件证明，两旧根均隔离。新claim前重新验证，v3永久父额105、旧1/2仍100，claim3绑定scope/baseline；原source/完整Go/签名/价格/包络/observer门禁保留。campaign/binding/version三个断言RED→GREEN，48项定向race通过128.964秒、stderr0（cmd仅编译无匹配测试）。独立复核无确认P1/P2，非race定向过9.482秒。此处只交付接线；精确归档全Go20m、原生包络/Handler与最终freeze仍pending。

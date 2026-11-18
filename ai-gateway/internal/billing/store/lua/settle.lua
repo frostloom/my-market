@@ -1,0 +1,67 @@
+-- 结算/退款：把 delta 恰好在 Redis 余额上应用一次（幂等）。
+-- delta 语义：新余额 = 旧余额 - delta
+--   settle 正 delta 补扣；负 delta 退回
+--   reverse 用负 delta（-pre）全退
+-- 补扣超过当前余额时只扣到 0，不把余额打成负数。调用方据此结清账单并记下短欠，
+-- 避免「补扣被拒绝 → 账单永远 pending → 对账反复失败」。
+--
+-- KEYS[1] = billing:balance:{tenant_id}
+-- KEYS[2] = billing:delta:{request_id}  值 = v2:实际应用的 delta
+-- ARGV[1] = 请求的 delta
+--
+-- return {code, balance, applied}
+--   code: 1=按请求额应用, 2=补扣不足只扣到 0, 0=已应用过
+--   applied: 本次（或首次）实际应用的 delta
+-- Lua 5.1 numbers are doubles, and tostring only retains limited digits.
+-- Restrict all arithmetic and persisted delta markers to exact 14-digit integers.
+local function safe_int(raw, signed)
+  if not raw or not string.match(raw, '^%-?%d+$') then return nil end
+  local negative = string.sub(raw, 1, 1) == '-'
+  if negative and not signed then return nil end
+  local digits = negative and string.sub(raw, 2) or raw
+  digits = string.gsub(digits, '^0+', '')
+  if digits == '' then digits = '0' end
+  if #digits > 14 then return nil end
+  return tonumber(raw)
+end
+local bal = safe_int(redis.call('GET', KEYS[1]) or '0', false)
+local delta = safe_int(ARGV[1], true)
+if not bal or not delta then return redis.error_reply('cash amount outside safe range') end
+local existing = redis.call('GET', KEYS[2])
+if existing then
+  -- Original Lua wrote '1' as a sentinel and either applied the entire
+  -- requested delta or rejected it. It never recorded a partial charge.
+  -- New markers must be versioned so a genuine one-cent charge is distinct.
+  if existing == '1' then
+    return {0, bal, delta}
+  end
+  if string.sub(existing, 1, 3) == 'v2:' then
+    local prior = safe_int(string.sub(existing, 4), true)
+    if not prior then return redis.error_reply('cash guard outside safe range') end
+    return {0, bal, prior}
+  end
+  -- Preserve unversioned numeric amounts from the interim deployment,
+  -- including a reverse refund that differs from a retried settle delta.
+  local prior = safe_int(existing, true)
+  if not prior then return redis.error_reply('cash guard outside safe range') end
+  return {0, bal, prior}
+end
+local applied = delta
+if delta > 0 and bal < delta then
+  applied = bal
+  if applied < 0 then
+    applied = 0
+  end
+end
+if bal - applied > 99999999999999 then return redis.error_reply('cash balance outside safe range') end
+redis.call('SET', KEYS[2], 'v2:' .. tostring(applied), 'EX', 86400)
+if applied > 0 then
+  redis.call('DECRBY', KEYS[1], applied)
+elseif applied < 0 then
+  redis.call('INCRBY', KEYS[1], -applied)
+end
+local code = 1
+if delta > 0 and applied < delta then
+  code = 2
+end
+return {code, bal - applied, applied}
