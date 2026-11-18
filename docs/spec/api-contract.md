@@ -31,7 +31,7 @@
 - 键集分页：排序键 `(created_at DESC, id DESC)`；
 - `cursor` = Base64(`created_at,id`) 不透明令牌，首页不传；
 - `page_size` 默认 20、上限 50；
-- 响应：`{"items":[...], "next_cursor":"..." | null, "has_more":bool}`；`next_cursor=null` 即到底（App 显示"已经到底了"）。
+- 响应：`{"items":[...], "next_cursor":"..." | null, "has_more":bool}`；`next_cursor=null` 即到底（前端显示"已经到底了"）。
 
 ### 0.4 幂等
 
@@ -143,7 +143,7 @@ Provider 异步回调入口（mock/stripe test 均打到此处）。成功 200 `
 200 同分页结构；`Order`：`{"order_no","status","amount_cent","items":[...],"created_at","paid_at","fulfilled_at","closed_reason"}`
 
 ### GET /orders/{no}
-200 `Order`（App 轮询履约结果用）。错误：MALL_30001。
+200 `Order`（前端轮询履约结果用）。错误：MALL_30001。
 
 ### POST /orders/{no}/cancel
 仅 `created` 可取消 → closed(user) + 回补库存。幂等：已 closed 返回 200。错误：MALL_30002。
@@ -159,7 +159,7 @@ Provider 异步回调入口（mock/stripe test 均打到此处）。成功 200 `
 200 `{"items":[{"id":..,"goods":Goods,"seckill_price_cent":..,"remain":..,"start_at","end_at","status":"upcoming|ongoing|ended"}]}`
 
 ### POST /seckill/{id}/buy
-成功 202 `{"voucher":"M2026111812345999xyz","status":"queued"}`（凭证=order_no，seckill 服务预生成）
+成功 202 `{"voucher":"M2026111812345999xyzw","status":"queued"}`（凭证=order_no，21 字符 `M+14+6`，seckill 服务预生成）
 错误：MALL_40001/40002/40003/40004（秒杀不占用普通幂等键，防重靠唯一索引）。
 
 ### GET /seckill/orders/{voucher}

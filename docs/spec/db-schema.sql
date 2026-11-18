@@ -1,5 +1,5 @@
 -- my-market market 库 DDL（spec/db-schema.sql）
--- 依据 PRD v0.3 §7 + D15/D17。金额单位：分（BIGINT）。
+-- 依据 PRD v0.5 §7 + D15/D17；本 DDL 为字段/索引/枚举的权威定义（PRD §7 草案有已知漂移，以本文件为准）。金额单位：分（BIGINT）。
 -- 与 ai 库（ai-gateway 既有）同实例不同 schema：dev 同容器 MySQL :3307。
 -- 字符集 utf8mb4 / 引擎 InnoDB / 行格式 DYNAMIC；主键统一 BIGINT UNSIGNED AUTO_INCREMENT。
 

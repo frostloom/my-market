@@ -6,14 +6,16 @@
 
 ## R0 迁移
 
-- [ ] `ls my-market/ai-gateway/cmd` 与旧仓一致（7 个服务入口 + 工具齐全）；eval/、docs/、web/、scripts/ 已在
-- [ ] 旧仓根 `.git`、logs/、.gocache/ **未**迁入（`du -sh my-market/ai-gateway` 无 GB 级目录）
-- [ ] `go.work` 含两个模块：`github.com/frostloom/my-market` + `github.com/frostloom/ai-gateway`；`go build ./...` 两模块均零错误
-- [ ] `docker compose -f deploy/compose/docker-compose.yml --profile infra up -d` 起 MySQL 3307 / Redis 6381 / Kafka（宿主 29092 可 `kcat -L -b 127.0.0.1:29092`）
-- [ ] `docker compose --profile ai up -d` 起 gateway 全家（compose 显式 `GATEWAY_PORT=18080`）
-- [ ] `for p in 18080 9101 9103 9102 9105; do curl -sf localhost:$p/healthz; done` 全部 200
-- [ ] 冒烟：注册租户 → curl `POST :18080/v1/chat/completions`（Bearer key）→ billing 查账出现 reserve+settle 两行
-- [ ] 旧 GitHub 仓已归档，README 顶部指向 my-market；新仓无 .env/密钥（`git log --all --diff-filter=A -- '*.env'` 为空）
+> 2026-11-18 回填：R0 已完成（7/8 勾选；第 8 项旧仓归档=待用户操作，密钥子项已验通过）。
+
+- [x] `ls my-market/ai-gateway/cmd` 与旧仓一致（7 个服务入口 + 工具齐全）；eval/、docs/、web/、scripts/ 已在
+- [x] 旧仓根 `.git`、logs/、.gocache/ **未**迁入（`du -sh my-market/ai-gateway` 无 GB 级目录）
+- [x] `go.work` 含两个模块：`github.com/frostloom/my-market` + `github.com/frostloom/ai-gateway`；`go build ./...` 两模块均零错误
+- [x] `docker compose -f deploy/compose/docker-compose.yml --profile infra up -d` 起 MySQL 3307 / Redis 6381 / Kafka（宿主 29092 可 `kcat -L -b 127.0.0.1:29092`）
+- [x] `docker compose --profile ai up -d` 起 gateway 全家（compose 显式 `GATEWAY_PORT=18080`）
+- [x] `for p in 18080 9101 9103 9102 9105; do curl -sf localhost:$p/healthz; done` 全部 200（注：实际契约修正为 9103/9102/9105 /healthz + 18080 GET / + 9101 nc，见 R0 台账裁定）
+- [x] 冒烟：注册租户 → curl `POST :18080/v1/chat/completions`（Bearer key）→ billing 查账出现 reserve+settle 两行
+- [ ] 旧 GitHub 仓已归档，README 顶部指向 my-market；新仓无 .env/密钥（密钥子项已验通过；**旧仓归档=待用户操作**）
 
 ## R1 商城切片（goods/cart/order/bff）
 

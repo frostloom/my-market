@@ -28,7 +28,7 @@
 
 ### 1.2 背景与来源
 
-1. **学校作业（已取消，2026-11-18）**：原计划以鸿蒙 ArkTS 商城客户端交付《移动应用开发》大作业，老师取消后不再交付任何鸿蒙产物；mall 保持纯 API 形态（此条保留作历史背景）。
+1. **学校作业（已取消，2026-11-18）**：原计划以鸿蒙 ArkTS 商城客户端交付《移动应用开发》大作业，老师取消后不再交付任何鸿蒙产物；客户端形态见 §5.4（Web 双前端）。
 2. **ai-gateway（已开发完成）**：OpenAI 兼容多租户模型网关 + 计费平台，7 个 Go 微服务，核心是计费正确性（Redis 原子预扣、幂等结算/冲正、对账、Kafka 事件流、充值/订阅、AI 客服、Vue3 控制台）。
 3. **个人目标**：高完成度面试作品——Go 微服务、gRPC、Redis/Kafka/MySQL、K8s 云原生、秒杀高并发。
 
@@ -86,11 +86,11 @@ AI 售卖沿用 gateway 现状，**只有两种模式**：
 | Kafka 事件流 | 计费明细事件（segmentio/kafka-go；Producer 单 topic 绑定，新 topic 需新实例） | 复用 pkg/kafka，新增 seckill.orders topic |
 | 充值订单 | RechargeOrder 状态机（store 层完整，幂等 order_no）；退款 `min(订单额度, 当前余额)` | 状态机与退款口径的参照范式 |
 | 订阅 | GPT Plus 式月卡：每 RefreshHours（默认 5h）滚动窗口各档 token 额度；额度内 funding=subscription、pre=0；超额 402；**程序化开通/续订接口不存在**（端点 403，store 层 SubscribePlan 不收月费、无幂等 ref） | R2.5 的 ActivateSubscription 为全新开发 |
-| **门户账号体系** | `/auth/register` `/auth/login` `/auth/me` `/auth/logout`（用户名密码、bcrypt、注册同事务建租户、12h 会话、HttpOnly cookie agw_user；登录注册并发槽位 4） | App 注册登录直接复用（mall-bff 经 gateway 代理调用，D14） |
+| **门户账号体系** | `/auth/register` `/auth/login` `/auth/me` `/auth/logout`（用户名密码、bcrypt、注册同事务建租户、12h 会话、HttpOnly cookie agw_user；登录注册并发槽位 4） | 前端注册登录直接复用（mall-bff 经 gateway 代理调用，D14） |
 | 路由熔断 | 内存模式：5 连败跳闸→10s 冷却→半开 1 探测；Redis 模式：**60 秒窗口 20 次平台失败**；AutoBan 写 providers.status=2 持久化；**失败计数已 Redis 共享，状态机仍每实例内存** | 上游熔断已有；多副本仅状态机待共享（P1 表述已修正） |
 | AI 客服 | agent 服务，执行层不信任 LLM；内部凭证 X-Agent-Internal + X-Agent-Tenant（未配置该 token 时内部路径关闭） | 不动；P6 商城工具集依赖内部凭证（部署须配置） |
 | 可观测 | Prometheus 指标 + OTel trace | 商城接入同一套 |
-| Web 控制台 | Vue3 双入口；gateway 同时托管数据面与页面 | 保留，与 App 并存 |
+| Web 控制台 | Vue3 双入口；gateway 同时托管数据面与页面 | 保留，与商城前端并存 |
 | 评测资产 | eval/ 220M（含 langfuse-workbench） | **随仓迁移**，评测在新仓继续 |
 
 **服务与端口（dev，已核实）**：gateway **代码默认 8080，dev 由 `GATEWAY_PORT=18080` 显式设定（迁移后 compose 必须带）** · billing 9101(gRPC)/9103(admin HTTP，**全端口要求 X-Control-Token**，含 /auth/*) · router 9102 · agent 9105 · mock-provider 9201-9203 · MySQL 3307 · Redis 6381 · Kafka **容器内 9092 / 宿主映射 29092**（宿主进程接入用 29092）。
@@ -100,12 +100,12 @@ AI 售卖沿用 gateway 现状，**只有两种模式**：
 
 ## 4. 整体体系
 
-分层结构与全部服务流转图见 **[architecture.md](architecture.md)**（八图：全景架构、充值闭环〔含支付回调与 outbox〕、混合订单、月卡生效、退款、秒杀、App 会话鉴权、部署演进）。此处仅列业务域：
+分层结构与全部服务流转图见 **[architecture.md](architecture.md)**（八图：全景架构、充值闭环〔含支付回调与 outbox〕、混合订单、月卡生效、退款、秒杀、会话鉴权、部署演进）。此处仅列业务域：
 
 | 业务域 | 服务 | 状态 | 职责 |
 |---|---|---|---|
 | 商品域 | mall-goods（新） | 新建 | 商品/品类/分页/普通商品库存 |
-| 交易域 | mall-order（新）、mall-bff（新） | 新建 | 购物车、订单状态机、支付回调、outbox 履约、App REST 入口与会话适配 |
+| 交易域 | mall-order（新）、mall-bff（新） | 新建 | 购物车、订单状态机、支付回调、outbox 履约、REST 入口与会话适配 |
 | 营销域 | seckill（新） | 新建 | 秒杀活动、库存预热、Lua 扣减、削峰、回补、对账 |
 | 计费域 | billing（已有） | **加法改造** | 新增 `Credit` 与 `ActivateSubscription` 两个幂等 gRPC；内核语义不动 |
 | AI 网关域 | gateway、router、mock-provider（已有） | 不动 | 推理数据面 |
@@ -146,7 +146,7 @@ created ──支付回调(验签·幂等)──► paid ──outbox worker 按
 
 **购物车**：登录后可用；MySQL `cart_items` 持久化；可进购物车 = general + subscription；上限 20 行、单行 qty ≤ 99；结算生成混合订单，价格按行快照。
 
-**mall-bff**：App 唯一 REST 入口。**会话适配（D14 裁定）**：App 发 `Authorization: Bearer <会话token>`，mall-bff 经 **gateway :18080 的 `/auth/*` 代理**验证会话（gateway 已实现代理注入 X-Control-Token 并透传 agw_user cookie），mall-bff **不直连 billing 9103**——billing 零改动。**余额/流水查询（N9）**：mall-bff 以内部服务身份（持 X-Control-Token）调 billing gRPC `GetBalance` 与 admin topups 查询。**基础限流（D12 落点，N11）**：per-tenant Redis 计数器，默认 120 req/min，写接口更严。API 契约见 spec/api-contract.md。
+**mall-bff**：商城唯一 REST 入口。**会话适配（D14 裁定）**：前端发 `Authorization: Bearer <会话token>`，mall-bff 经 **gateway :18080 的 `/auth/*` 代理**验证会话（gateway 已实现代理注入 X-Control-Token 并透传 agw_user cookie），mall-bff **不直连 billing 9103**——billing 零改动。**余额/流水查询（N9）**：mall-bff 以内部服务身份（持 X-Control-Token）调 billing gRPC `GetBalance` 与 admin topups 查询。**基础限流（D12 落点，N11）**：per-tenant Redis 计数器，默认 120 req/min，写接口更严。API 契约见 spec/api-contract.md。
 
 **Credit（billing 加法改造之一，D13 裁定）**：新增 gRPC `Credit(tenant_id, amount_cent, ref_type="mall", ref_id=order_no:line_no)`——billing 侧走 topups 现成**同步 MySQL 事务**路径（topup 行 + ledger_balance 同事务，MySQL 为提交点，Redis 投影对齐；复用 `uk_ref(ref_type, ref_id)` 复合唯一索引幂等），重复调用 no-op。**不打开旧 403 充值端点**，本 RPC 成为唯一程序化入账入口。
 
@@ -192,7 +192,7 @@ created ──支付回调(验签·幂等)──► paid ──outbox worker 按
 | 参数 | 裁定值 |
 |---|---|
 | 普通订单支付超时 | 30 分钟（定时扫描关闭 + 库存回补） |
-| 秒杀支付超时 | 15 分钟（唯一自动回补场景） |
+| 秒杀支付超时 | 15 分钟（对账处置中唯一自动回补场景） |
 | 游标分页 | 键集 `(created_at, id)` 降序，不透明 Base64 游标；page_size 默认 20、上限 50 |
 | 幂等键作用域 | `(tenant_id, key)`；同 key 同 payload 返回原单，不同 payload 拒绝 409 |
 | 订单号格式 | `M + yyyyMMddHHmmss + 6 位随机`（作为 Credit ref_id 前缀的组成部分） |
@@ -205,12 +205,13 @@ created ──支付回调(验签·幂等)──► paid ──outbox worker 按
 
 ## 6. 核心业务流程
 
-八张图全部在 [architecture.md](architecture.md)：充值闭环（含支付回调 + outbox 履约 + 推理扣费）、混合购物车订单、月卡生效、**退款**、秒杀、App 会话鉴权、全景架构、部署演进。含错误分支的详细时序在 spec/sequences.md 产出。
+八张图全部在 [architecture.md](architecture.md)：充值闭环（含支付回调 + outbox 履约 + 推理扣费）、混合购物车订单、月卡生效、**退款**、秒杀、会话鉴权、全景架构、部署演进。含错误分支的详细时序在 spec/sequences.md 产出。
 
 ---
 
 ## 7. 数据模型（market 库——**实体级草案**，最终 DDL 在 spec/db-schema.sql 定稿）
 
+> **本节枚举为 v0.2 时代快照，与 DDL 存在已知漂移（seckill 状态集、voucher_no 列名、fulfillment 的 voided 态、mall_orders 的 kind/closed_at 等）——一切以 docs/spec/db-schema.sql 为准。**
 > 定稿时补齐：字段类型、索引（tenant_id+created_at 分页等）、约束与默认值、时间戳列、utf8mb4、软删除策略。
 
 ```
@@ -345,7 +346,7 @@ my-market/
 | **R4 秒杀+压测** | seckill 全链路 + 对账 + 压测报告 | 1000 并发无超卖（DB 计数验证）；滞留对账收敛（保留待核查口径）；QPS/P99 报告；扩容曲线项待 R3 HPA 就绪后测 |
 | **R6 双前端** | spec 增补冻结 admin 契约 → web/ 工程（mall-user + mall-admin 双入口）→ mall-bff 静态托管与 /admin API → 两端页面 | 用户端页面化全链路（登录→浏览→购物车→下单→支付→订单→充值包直购）；管理端可管商品/订单/秒杀活动；秒杀入口页待 R4 |
 
-依赖：R1←R0；R2←R1；R2.5←R2；R3←R2.5；R4←R2（扩容曲线项依赖 R3）；R6←R2.5（秒杀入口页←R4），可与 R3 并行。
+依赖：R1←R0；R2←R1；R2.5←R2；R3←R2.5；R4←R2（扩容曲线项依赖 R3）；R6←R2.5（用户端秒杀入口页与**管理端秒杀活动管理**均←R4），可与 R3 并行。
 排期背景：原作业截止约束已随作业取消消失（v0.4）；v0.5 增补 R6 双前端为必达目标。
 
 ---

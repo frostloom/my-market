@@ -270,7 +270,7 @@ sequenceDiagram
     L-->>G: 会话 token + tenant_id
     G-->>B: 同上
     B-->>A: 返回会话 token（前端本地保存）
-    note over A,L: 之后每次商城请求：<br/>App 带 Authorization: Bearer 会话token<br/>mall-bff 经 gateway /auth/me 验证 → 派生 tenant
+    note over A,L: 之后每次商城请求：<br/>前端带 Authorization: Bearer 会话token<br/>mall-bff 经 gateway /auth/me 验证 → 派生 tenant
     note over A: API key 与登录无关：<br/>仅用于外部程序调 gateway /v1
 ```
 

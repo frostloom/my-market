@@ -72,7 +72,7 @@ Expected: 除 `.env.example` 外无输出。然后 `git commit -m "chore: migrat
 
 **Files:**
 - Create: `go.mod`（根模块）、`go.work`
-- Create: `services/mall-bff/README.md`、`services/mall-goods/README.md`、`services/mall-order/README.md`、`services/seckill/README.md`、`app/harmony/README.md`、`deploy/compose/README.md`（占位，各一行说明归属阶段）
+- Create: `services/mall-bff/README.md`、`services/mall-goods/README.md`、`services/mall-order/README.md`、`services/seckill/README.md`、`deploy/compose/README.md`（占位，各一行说明归属阶段；v0.5 注：原列出的 app/harmony/README.md 已随鸿蒙作业取消移除）
 
 **Interfaces:**
 - Produces: 根模块 `github.com/frostloom/my-market`；go.work 含 `.` 与 `./ai-gateway`（R1 的 mall 服务代码全部位于根模块）
