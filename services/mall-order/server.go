@@ -1,8 +1,8 @@
 // mall-order：server.go 把 Store 结果映到 mallv1 契约消息，
 // 并把 mallerr 契约码映射为 gRPC status（bff 侧再映回 HTTP）。
-// 本任务只实现下单域：CreateCartOrder/GetOrder/ListOrders + 购物车四操作；
-// 支付域（MarkPaid/CancelOrder/RefundOrder）为下一任务，沿用内嵌
-// Unimplemented 的 codes.Unimplemented。
+// 覆盖下单域（CreateCartOrder/GetOrder/ListOrders + 购物车四操作）与
+// 支付域（MarkPaid/CancelOrder/RefundOrder）；履约/超时为进程内 worker
+// （worker.go/main.go），回调验签路径见 payment.go。
 package main
 
 import (
@@ -74,6 +74,72 @@ func (s *orderServer) ListOrders(ctx context.Context, req *mallv1.ListOrdersReq)
 		items = append(items, toProtoOrder(o))
 	}
 	return &mallv1.ListOrdersReply{Items: items, NextCursor: p.NextCursor, HasMore: p.HasMore}, nil
+}
+
+// MarkPaid 支付结果落账（契约 Provider 回调 / mock 内部回调幂等入口）。
+// paid=true 置 paid；paid=false 失败回调：payment_records 置 failed，
+// 订单停留 created（R0 台账裁定）。tenant_id 服务端重校验：订单不存在
+// 或不归属该租户 → MALL_30001（与 GetOrder 同口径，不泄漏存在性）。
+func (s *orderServer) MarkPaid(ctx context.Context, req *mallv1.MarkPaidReq) (*mallv1.OrderReply, error) {
+	var tenantID uint64
+	var cb Callback
+	if req != nil {
+		tenantID = req.GetTenantId()
+		cb = Callback{
+			OrderNo:    req.GetOrderNo(),
+			Provider:   req.GetProvider(),
+			TradeNo:    req.GetProviderTradeNo(),
+			Paid:       req.GetPaid(),
+			AmountCent: req.GetAmountCent(),
+		}
+	}
+	if _, err := s.store.GetOrder(ctx, tenantID, cb.OrderNo); err != nil {
+		return nil, toGRPCError(err)
+	}
+	if err := s.store.MarkPaidTx(ctx, cb); err != nil {
+		return nil, toGRPCError(err)
+	}
+	ord, err := s.store.GetOrder(ctx, tenantID, cb.OrderNo)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return toProtoOrder(ord), nil
+}
+
+// CancelOrder 取消订单（契约 POST /orders/{no}/cancel）：仅 created 可取消
+// → closed(user) + 回补库存；幂等（已 closed 返回当前状态 200）。
+func (s *orderServer) CancelOrder(ctx context.Context, req *mallv1.CancelOrderReq) (*mallv1.OrderReply, error) {
+	var tenantID uint64
+	var orderNo string
+	if req != nil {
+		tenantID, orderNo = req.GetTenantId(), req.GetOrderNo()
+	}
+	if err := s.store.CancelOrder(ctx, tenantID, orderNo); err != nil {
+		return nil, toGRPCError(err)
+	}
+	ord, err := s.store.GetOrder(ctx, tenantID, orderNo)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return toProtoOrder(ord), nil
+}
+
+// RefundOrder 退款（契约 §5；R1 仅 paid 分支：先作废 pending 履约行再退）。
+// RefundReply.refund_cent = 订单金额（R1 全额退）。
+func (s *orderServer) RefundOrder(ctx context.Context, req *mallv1.RefundOrderReq) (*mallv1.RefundReply, error) {
+	var tenantID uint64
+	var orderNo string
+	if req != nil {
+		tenantID, orderNo = req.GetTenantId(), req.GetOrderNo()
+	}
+	if err := s.store.RefundPaid(ctx, tenantID, orderNo); err != nil {
+		return nil, toGRPCError(err)
+	}
+	ord, err := s.store.GetOrder(ctx, tenantID, orderNo)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return &mallv1.RefundReply{Status: ord.Status, RefundCent: ord.AmountCent}, nil
 }
 
 // GetCart 购物车视图（契约 GET /cart）。

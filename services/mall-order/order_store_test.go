@@ -97,11 +97,22 @@ func setStockRaw(t *testing.T, s *Store, id uint64, stock int) {
 	}
 }
 
-// cleanupTenant 测试结束后清除本测试租户写入的 orders/items/cart 行。
+// cleanupTenant 测试结束后清除本测试租户写入的 orders/items/cart 行，
+// 以及这些订单派生的支付流水与履约任务行（先于 mall_orders 删除）。
 func cleanupTenant(t *testing.T, s *Store, tenants ...uint64) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, tn := range tenants {
+			if err := s.db.Exec(
+				"DELETE FROM fulfillment_tasks WHERE order_no IN (SELECT order_no FROM mall_orders WHERE tenant_id = ?)",
+				tn).Error; err != nil {
+				t.Fatalf("cleanup 履约任务 tenant=%d: %v", tn, err)
+			}
+			if err := s.db.Exec(
+				"DELETE FROM payment_records WHERE order_no IN (SELECT order_no FROM mall_orders WHERE tenant_id = ?)",
+				tn).Error; err != nil {
+				t.Fatalf("cleanup 支付流水 tenant=%d: %v", tn, err)
+			}
 			if err := s.db.Exec(
 				"DELETE FROM mall_order_items WHERE order_no IN (SELECT order_no FROM mall_orders WHERE tenant_id = ?)",
 				tn).Error; err != nil {

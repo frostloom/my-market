@@ -1,7 +1,8 @@
 // mall-order 服务入口：gRPC（mallv1.OrderService + 标准健康检查）监听
 // ORDER_GRPC_ADDR（默认 :9112）；小 HTTP 监听 ORDER_HTTP_ADDR（默认 :9120）
 // 只挂 /healthz（compose 健康检查用）。DSN 必须经 MARKET_MYSQL_DSN 注入
-// （凭据不硬编码、不落代码仓）。
+// （凭据不硬编码、不落代码仓）。支付域 worker（履约 10s / 超时扫描 60s）
+// 为进程内 goroutine，随退出信号优雅停止。
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -73,13 +75,29 @@ func main() {
 	healthSrv.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	log.Printf("mall-order 起服务：gRPC %s，HTTP %s（/healthz）", grpcAddr, httpAddr)
 
-	// 优雅退出：SIGINT/SIGTERM → 摘健康状态 → GracefulStop。
+	// 支付域 worker：履约 outbox（10s 一轮）+ 超时关单扫描（60s 一轮）。
+	// 退出信号 → cancelWorker + Wait，保证在途一轮跑完再停（worker.go）。
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	var workerWG sync.WaitGroup
+	workerWG.Add(2)
+	go func() {
+		defer workerWG.Done()
+		RunFulfillmentLoop(workerCtx, store)
+	}()
+	go func() {
+		defer workerWG.Done()
+		RunTimeoutLoop(workerCtx, store)
+	}()
+
+	// 优雅退出：SIGINT/SIGTERM → 摘健康状态 → 停 worker → GracefulStop。
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()
 		log.Printf("收到退出信号，开始优雅停机")
 		healthSrv.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+		cancelWorker()
+		workerWG.Wait()
 		gs.GracefulStop()
 	}()
 
