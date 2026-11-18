@@ -7,6 +7,8 @@
 
 ## 0. 通用约定
 
+> **同源托管**：生产环境商城双前端（mall-user / mall-admin）由 mall-bff go:embed 托管，与 API 同源（无 CORS）；开发期 Vite devServer 将 `/api` 代理至 `http://127.0.0.1:18090`。
+
 ### 0.1 鉴权
 
 | 项 | 约定 |

@@ -1,6 +1,7 @@
 # 核心时序（spec/sequences.md）
 
-> 依据 PRD v0.3 + architecture.md 八图；本文件补**错误分支**，为实现与验收的依据。图为 Mermaid，可渲染。
+> 依据 PRD v0.5 + architecture.md 八图；本文件补**错误分支**，为实现与验收的依据。图为 Mermaid，可渲染。
+> 调用方说明（2026-11-18）：鸿蒙作业已取消，图中 App/调用方 = **商城 Web 前端**（用户端 mall-user；管理端走 /admin/*，R6 契约增补）——见 PRD §5.4/D18。
 
 ---
 
@@ -9,7 +10,7 @@
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant O as mall-order
     participant P as PaymentProvider
@@ -54,7 +55,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant O as mall-order
     participant M as MySQL market
@@ -80,7 +81,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant O as mall-order
     participant L as billing
@@ -130,7 +131,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant S as seckill
     participant R as Redis
@@ -174,7 +175,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant G as gateway :18080
     participant L as billing :9103

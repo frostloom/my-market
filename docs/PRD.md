@@ -111,7 +111,7 @@ AI 售卖沿用 gateway 现状，**只有两种模式**：
 | AI 网关域 | gateway、router、mock-provider（已有） | 不动 | 推理数据面 |
 | 智能域 | agent（已有） | 不动 | AI 客服 |
 | 对账域 | reconciler、event-consumer（已有）+ 履约 worker、秒杀消费者、对账 job（新） | 扩展 | 最终一致兜底 |
-| 客户端域 | 鸿蒙 App（新）、Web（已有） | 新建/保留 | 购买入口 / 控制台 |
+| 客户端域 | 商城 Web 双前端（新，web/）、ai-gateway Web（已有） | 新建/保留 | 用户端商城 + 管理端控制台（R6）/ 计费侧控制台 |
 
 **架构原则**：① 余额/入账唯一权威在 billing（任何加钱动作只走 Credit，ref 幂等）；② 订单系统按业务域隔离：billing 内 RechargeOrder（充值，同步 MySQL 事务）与推理 bills（Redis 实时权威 + 批量落账）各自既有机制**均不动**；mall_order 为 market 库的独立订单体系（支付同步事务 + outbox 履约），秒杀走 Kafka 异步落库——分离理由是**业务域与演进隔离**，非持久化机制差异（v0.3 修正）；③ 对外仅 mall-bff 与 gateway 两个数据面入口；④ 同构模式复用（预扣/幂等/对账三模式多处落点）；⑤ 跨服务履约一致性用**轻量事务性发件箱**：支付置 paid 的同一事务写 fulfillment_tasks → 后台 worker 执行 Credit/ActivateSubscription（幂等可重试）→ 全行 done 才 fulfilled → 对账 job 扫滞留兜底；⑥ mall 侧稳定性三板斧 = 超时 + 重试 + 对账，不新增服务间熔断框架（上游熔断 router 已有）。
 
@@ -255,6 +255,7 @@ fulfillment_tasks(id, order_no, line_no, type[ship|credit|subscribe],
 | GET | /api/v1/seckill/activities · /seckill/orders/{no} | 秒杀列表/结果 |
 | POST | /api/v1/seckill/{id}/buy | 秒杀下单（排队语义，返回凭证=order_no） |
 | GET | /api/v1/me/overview | 余额/最近流水（mall-bff 内部凭证调 billing GetBalance/topups） |
+| * | /api/v1/admin/* | 管理端控制台（商品/订单/秒杀/统计——R6 前契约冻结，见 api-contract §9） |
 
 鉴权：`Authorization: Bearer <会话token>`（登录凭证，非 API key）。
 错误响应骨架：`{"error":"...","code":"MALL_XXXXX","retryable":false}`。
@@ -306,6 +307,7 @@ my-market/
 │   └── plans/                 # 阶段任务拆解（superpowers 任务清单）
 ├── ai-gateway/                # 整仓迁入，模块路径不变，eval/ 随迁
 ├── services/                  # mall-bff / mall-goods / mall-order / seckill
+├── web/                       # 商城前端工程（Vue3+Vite+TS 双入口 mall-user/mall-admin，R6；构建产物 go:embed 进 mall-bff）
 ├── proto/                     # 商城侧 .proto（含 Credit/ActivateSubscription 扩展）
 ├── pkg/                       # 商城侧公共库（mallerr/mallpage 等）
 ├── deploy/

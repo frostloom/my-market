@@ -115,7 +115,7 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff :18090
     participant O as mall-order :9112
     participant P as PaymentProvider<br/>mock
@@ -145,7 +145,7 @@ sequenceDiagram
     L->>R: Redis 余额投影对齐
     L-->>W: ok（ref 已存在则 no-op）
     W->>MM: 行 done；全行 done → status=fulfilled
-    W-->>A: 订单完成（App 轮询 /orders/{no} 可见）
+    W-->>A: 订单完成（前端轮询 /orders/{no} 可见）
     end
 
     rect rgb(235,255,240)
@@ -167,7 +167,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A["App 登录用户"] -->|"加购 general / 月卡<br/>上限20行·qty≤99"| CART["购物车 cart_items<br/>MySQL 持久化"]
+    A["用户（商城前端）"] -->|"加购 general / 月卡<br/>上限20行·qty≤99"| CART["购物车 cart_items<br/>MySQL 持久化"]
     CART -->|"结算（行级价格快照）"| CREATE["mall-order 下单事务：<br/>mall_orders=created + 行快照<br/>+ 同库直扣 goods.stock"]
     CREATE -.->|"超时 30 分钟未支付<br/>或用户主动取消"| CLOSE["closed + general 行回补库存"]
     CREATE --> PAY["PaymentProvider<br/>CreatePayment"]
@@ -191,7 +191,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant O as mall-order
     participant W as 履约 worker
@@ -213,7 +213,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as App
+    participant A as 商城前端
     participant B as mall-bff
     participant O as mall-order
     participant L as billing
@@ -254,7 +254,7 @@ flowchart TB
 
 ---
 
-## 8. 服务流转六：App 会话与鉴权（billing 零改动，经 gateway 代理）
+## 8. 服务流转六：会话与鉴权（商城前端，billing 零改动，经 gateway 代理）
 
 ```mermaid
 sequenceDiagram
@@ -269,7 +269,7 @@ sequenceDiagram
     G->>L: 代理（gateway 注入 X-Control-Token + 透传 cookie）
     L-->>G: 会话 token + tenant_id
     G-->>B: 同上
-    B-->>A: 返回会话 token（App 本地保存）
+    B-->>A: 返回会话 token（前端本地保存）
     note over A,L: 之后每次商城请求：<br/>App 带 Authorization: Bearer 会话token<br/>mall-bff 经 gateway /auth/me 验证 → 派生 tenant
     note over A: API key 与登录无关：<br/>仅用于外部程序调 gateway /v1
 ```
@@ -292,6 +292,8 @@ flowchart LR
 ```
 
 K8s 验收七项（不再加戏）：多副本+反亲和 · HPA · 滚动更新 · 探针 · Prometheus/Grafana/Jaeger · Ingress · 节点 drain 自愈。
+
+> R6 前端部署：`web/` 先 `npm run build`，产物由 mall-bff **go:embed 托管**（构建顺序同 ai-gateway web 模式：前端构建先于 go build）；生产同源无 CORS，开发期 Vite devServer 将 `/api` 代理至 :18090。
 
 ---
 
