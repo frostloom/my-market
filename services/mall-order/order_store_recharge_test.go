@@ -191,3 +191,48 @@ func TestCreateRechargeOrder_IdemConflict(t *testing.T) {
 		t.Fatalf("stock(202) = %d，want %d（冲突请求整体回滚）", got, before202)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 5. TestCancelRechargeOrder_RestockMatchesDeduction：取消/超时回补必须与
+// 建单扣减对称——limited=0（建单未扣库存）取消后不得回补（否则 stock 虚增、
+// 污染种子锚点）；limited=1（建单扣了 1）取消后回补 1。
+// cart（kind=2）全行回补的既有口径由 timeout_test.go 既有测试锚定，不回归。
+func TestCancelRechargeOrder_RestockMatchesDeduction(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotGoods(t, s, 202) // limited+stock 快照还原（本测试临时改 limited）
+
+	// 1) 无限量档（种子 limited=0，stock=0）：建单不动库存，取消也不得动。
+	ordU, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "rech-cancel-u")
+	if err != nil {
+		t.Fatalf("无限量档建单: %v", err)
+	}
+	before := stockOf(t, s, 202)
+	if err := s.CancelOrder(ctx, testTenantA, ordU.OrderNo); err != nil {
+		t.Fatalf("取消无限量档订单: %v", err)
+	}
+	status, _ := orderStatusOf(t, s, ctx, testTenantA, ordU.OrderNo)
+	if status != "closed" {
+		t.Fatalf("取消后 status = %s，want closed", status)
+	}
+	if got := stockOf(t, s, 202); got != before {
+		t.Fatalf("取消后 stock(202) = %d，want %d（limited=0 建单未扣，取消不得回补）", got, before)
+	}
+
+	// 2) 限量档（临时 limited=1, stock=3）：建单扣 1，取消回补 1。
+	setGoodsRaw(t, s, 202, 1 /*limited*/, 3 /*stock*/)
+	ordL, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "rech-cancel-l")
+	if err != nil {
+		t.Fatalf("限量档建单: %v", err)
+	}
+	if got := stockOf(t, s, 202); got != 2 {
+		t.Fatalf("限量档建单后 stock(202) = %d，want 2（单内条件扣减）", got)
+	}
+	if err := s.CancelOrder(ctx, testTenantA, ordL.OrderNo); err != nil {
+		t.Fatalf("取消限量档订单: %v", err)
+	}
+	if got := stockOf(t, s, 202); got != 3 {
+		t.Fatalf("取消后 stock(202) = %d，want 3（limited=1 扣减对称回补）", got)
+	}
+}

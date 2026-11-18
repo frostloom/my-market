@@ -134,12 +134,20 @@ func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bo
 }
 
 // restockOrder 回补订单行库存（事务内；行快照 qty 按商品累回）。
+// 回补范围 = 建单时实际扣过库存的行，与扣减严格对称：
+//   - kind=2（cart 结算）：建单全行无条件直扣 → 全行回补（既有口径）；
+//   - kind=1（recharge 直购，R2-T2）：仅 limited=1 商品建单时条件扣减，
+//     无限量档（limited=0）建单不碰库存 → 取消/超时同样不得回补
+//     （否则 stock 虚增、污染种子锚点——TestCancelRechargeOrder_RestockMatchesDeduction）；
+//   - 其他 kind（如未来的 seckill）：按 limited=1 行保守回补；接入时若扣减
+//     口径不同，需同步此处。
 func restockOrder(tx *gorm.DB, orderNo string) error {
 	res := tx.Exec(
 		"UPDATE goods g "+
 			"JOIN mall_order_items i ON i.goods_id = g.id "+
+			"JOIN mall_orders o ON o.order_no = i.order_no "+
 			"SET g.stock = g.stock + i.qty "+
-			"WHERE i.order_no = ?", orderNo)
+			"WHERE i.order_no = ? AND (o.kind = 2 OR g.limited = 1)", orderNo)
 	if res.Error != nil {
 		return fmt.Errorf("mall-order: restock %s: %w", orderNo, res.Error)
 	}
