@@ -9,6 +9,9 @@
 // 退避（2^n 秒），retry_count 达 5 → failed 终态（对账介入）。
 // credit 行断电窗口由 billing uk_ref 幂等兜底：Credit 已提交、done 未标 →
 // 重放同 ref no-op → 收敛（恰入账一次，TestWorker_CreditCrashReplay_ExactlyOneTopup）。
+// 并发退款竞态（窗口 R1：快照拉取后被 RefundPaid 作废）由两层防护收口：
+// 执行前复检 pending（缩窗）+ 入账后 done 0 行时 mall-void ref 冲销补偿
+// （creditLine / compensateVoidedCredit；窗口分析见 refund.go 文件头）。
 //
 // 进程内双循环（main.go 起两个 goroutine，退出信号经 ctx 取消优雅停止）：
 //   - RunFulfillmentLoop：履约轮询，间隔 10s；
@@ -64,8 +67,8 @@ type fulfillmentTaskRow struct {
 func (fulfillmentTaskRow) TableName() string { return "fulfillment_tasks" }
 
 // RunFulfillmentOnce 执行一轮履约：拉到期 pending → 逐行履约（credit 行走
-// billing.Credit 真实入账通道，其余走 shipLine 接缝/mock）→ 标 done，
-// 推进全行 done 的订单至 fulfilled。返回本轮完成的任务行数。
+// billing.Credit 真实入账通道且履约收口自持，其余走 shipLine 接缝/mock）→ 标
+// done，推进全行 done 的订单至 fulfilled。返回本轮完成的任务行数。
 func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 	var tasks []fulfillmentTaskRow
 	if err := s.db.WithContext(ctx).
@@ -73,10 +76,33 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 		Order("id ASC").Limit(fulfillmentBatch).Find(&tasks).Error; err != nil {
 		return 0, fmt.Errorf("mall-order: pull fulfillment tasks: %w", err)
 	}
+	ship := s.shipLine
+	if ship == nil {
+		ship = shipLineMock
+	}
 	done := 0
 	touched := make(map[string]bool, len(tasks))
 	for _, t := range tasks {
-		shipErr := s.fulfillLine(ctx, t)
+		if t.TaskType == taskTypeCredit {
+			// credit 行：履约收口自持（复检 pending → billing.Credit → done
+			// 条件更新；行被并发退款 voided 时立即冲销补偿——R1 窗口，见
+			// creditLine 注释）。marked=false（跳过/已冲销）不计 done。
+			marked, err := s.creditLine(ctx, t)
+			if err != nil {
+				// 入账或收口失败 → 退避重试（重放由 billing uk_ref 幂等兜底；
+				// Credit 已提交而 done 更新报 DB 错的极罕见情形也由重放收敛）。
+				if berr := s.backoffTask(ctx, t, err); berr != nil {
+					return done, berr
+				}
+				continue
+			}
+			if marked {
+				done++
+				touched[t.OrderNo] = true
+			}
+			continue
+		}
+		shipErr := ship(ctx, t)
 		if shipErr == nil {
 			// 条件更新幂等：并发 worker / 重放时 RowsAffected=0 不计 done。
 			res := s.db.WithContext(ctx).Exec(
@@ -91,20 +117,8 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		// 失败：retry_count+1 指数退避；达上限 → failed 终态。
-		// MySQL 单表 UPDATE 的 SET 从左到右求值：next_run_at 与 status 必须排在
-		// retry_count 自增之前，引用到的才是旧值——首败延迟 2s，序列 2/4/8/16/32s，
-		// 第 5 次失败（旧 retry_count=4）转 failed 且 retry_count 终值 5（brief/
-		// db-schema"上限 5"口径；若排在自增后会整体提前一拍，退避 4s 起步）。
-		if err := s.db.WithContext(ctx).Exec(
-			"UPDATE fulfillment_tasks "+
-				"SET next_run_at = DATE_ADD(NOW(3), INTERVAL POWER(2, retry_count + 1) SECOND), "+
-				"    status = IF(retry_count + 1 >= ?, ?, status), "+
-				"    retry_count = retry_count + 1, "+
-				"    last_error = LEFT(?, 512) "+
-				"WHERE id = ? AND status = ?",
-			fulfillmentMaxRetry, taskStatusFailed, shipErr.Error(), t.ID, taskStatusPending).Error; err != nil {
-			return done, fmt.Errorf("mall-order: backoff task %d: %w", t.ID, err)
+		if err := s.backoffTask(ctx, t, shipErr); err != nil {
+			return done, err
 		}
 	}
 
@@ -158,35 +172,61 @@ func (s *Store) promoteAllFulfilled(ctx context.Context) (int64, error) {
 	return res.RowsAffected, nil
 }
 
-// fulfillLine 单行履约分发（R2-T3）：task_type=credit 的行走 billing.Credit
-// 真实入账通道（不经 shipLine 接缝——入账幂等由 billing uk_ref 承担，接缝
-// 桩测经 Store.billing 注入）；其余行（ship/subscribe）走既有 shipLine 接缝
-// （nil = mock，故障演练/物流渠道注入语义不变）。
-func (s *Store) fulfillLine(ctx context.Context, t fulfillmentTaskRow) error {
-	if t.TaskType == taskTypeCredit {
-		return s.creditLine(ctx, t)
+// backoffTask 履约失败退避：retry_count+1 指数退避；达上限 → failed 终态。
+// MySQL 单表 UPDATE 的 SET 从左到右求值：next_run_at 与 status 必须排在
+// retry_count 自增之前，引用到的才是旧值——首败延迟 2s，序列 2/4/8/16/32s，
+// 第 5 次失败（旧 retry_count=4）转 failed 且 retry_count 终值 5（brief/
+// db-schema"上限 5"口径；若排在自增后会整体提前一拍，退避 4s 起步）。
+func (s *Store) backoffTask(ctx context.Context, t fulfillmentTaskRow, shipErr error) error {
+	if err := s.db.WithContext(ctx).Exec(
+		"UPDATE fulfillment_tasks "+
+			"SET next_run_at = DATE_ADD(NOW(3), INTERVAL POWER(2, retry_count + 1) SECOND), "+
+			"    status = IF(retry_count + 1 >= ?, ?, status), "+
+			"    retry_count = retry_count + 1, "+
+			"    last_error = LEFT(?, 512) "+
+			"WHERE id = ? AND status = ?",
+		fulfillmentMaxRetry, taskStatusFailed, shipErr.Error(), t.ID, taskStatusPending).Error; err != nil {
+		return fmt.Errorf("mall-order: backoff task %d: %w", t.ID, err)
 	}
-	ship := s.shipLine
-	if ship == nil {
-		ship = shipLineMock
-	}
-	return ship(ctx, t)
+	return nil
 }
 
-// creditLine recharge 行履约：billing.Credit 入账（R2-T3）。
+// creditLine recharge 行履约（R2-T3 + Fix Round 1 收口）：billing.Credit 入账
+// 且履约收口自持（done 标记与冲销补偿在本函数闭环）。
 //
 // 请求组装（裁定 1/2）：tenant 取自订单头（mall_orders.tenant_id，任务行只带
 // order_no/line_no）；金额 = 行快照 face_value_cent + bonus_cent（赠送随入账）；
 // ref_type="mall"、ref_id=order_no:line_no —— billing uk_ref(ref_type,ref_id)
 // 是"恰入账一次"的幂等提交点。成功（created=true）或重放 no-op（created=false，
 // billing 已入账）都算履约成功；失败返回错误走既有退避（第 5 败 failed 交对账）。
-// 崩溃窗口：Credit 已提交、done 未标 → 重放同 ref → no-op → 收敛（不重不漏，
-// TestWorker_CreditCrashReplay_ExactlyOneTopup）。
-func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) error {
+//
+// 窗口 R1 两层防护（worker 快照与并发 RefundPaid 的竞态，详见 refund.go 文件头）：
+//   - 层一（缩窗）：执行前单行复检任务行仍 pending——快照拉取与执行之间已被
+//     voided 的行静默跳过（零副作用，不触 billing）；
+//   - 层二（兜底）：入账提交后 done 条件更新影响 0 行（复检与 done 之间的
+//     亚毫秒窗口内被 voided）→ billing 已真实入账而订单已被退款 → 立即以独立
+//     冲销 ref `mall-void:{order_no}:{line_no}` 调 billing.Refund 补偿并告警。
+//
+// 返回 marked：任务行已标 done（正常收口）= true；跳过（已 voided）或已冲销
+// 补偿 = false（均不计入本轮 done，行未完成）。
+func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) (bool, error) {
 	if s.billing == nil {
-		return mallerr.E(mallerr.CodeUpstreamUnavailable, true,
+		return false, mallerr.E(mallerr.CodeUpstreamUnavailable, true,
 			"billing client 未接线（credit 行履约需要 %s/%s）", billingAddrEnv, billingTokenEnv)
 	}
+
+	// 层一：复检任务行仍 pending（单行主键 SELECT）。已 voided/done/failed →
+	// 静默跳过（billing 零触达，无补偿必要）。
+	var st int8
+	if err := s.db.WithContext(ctx).
+		Raw("SELECT status FROM fulfillment_tasks WHERE id = ?", t.ID).
+		Scan(&st).Error; err != nil {
+		return false, fmt.Errorf("mall-order: recheck credit task %d: %w", t.ID, err)
+	}
+	if st != taskStatusPending {
+		return false, nil
+	}
+
 	// 行快照 + 租户：JOIN 订单头取 tenant_id，行表取 face/bonus 快照。
 	var line struct {
 		TenantID      uint64 `gorm:"column:tenant_id"`
@@ -201,16 +241,16 @@ func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) error {
 		Where("mall_order_items.order_no = ? AND mall_order_items.line_no = ?", t.OrderNo, t.LineNo).
 		Scan(&line).Error
 	if err != nil {
-		return fmt.Errorf("mall-order: load credit line %s:%d: %w", t.OrderNo, t.LineNo, err)
+		return false, fmt.Errorf("mall-order: load credit line %s:%d: %w", t.OrderNo, t.LineNo, err)
 	}
 	if line.TenantID == 0 || line.LineType != typeCredit {
 		// 订单行缺失/类型不符：数据不一致，重试也不会好——退避后 failed 交对账。
-		return mallerr.E(mallerr.CodeInternal, false,
+		return false, mallerr.E(mallerr.CodeInternal, false,
 			"credit 行数据不一致: %s:%d（tenant=%d type=%d）", t.OrderNo, t.LineNo, line.TenantID, line.LineType)
 	}
 	amount := line.FaceValueCent + line.BonusCent
 	if amount <= 0 {
-		return mallerr.E(mallerr.CodeInternal, false,
+		return false, mallerr.E(mallerr.CodeInternal, false,
 			"credit 行金额非法: %s:%d（face=%d bonus=%d）", t.OrderNo, t.LineNo, line.FaceValueCent, line.BonusCent)
 	}
 	cctx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
@@ -222,9 +262,48 @@ func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) error {
 		RefId:      fmt.Sprintf("%s:%d", t.OrderNo, t.LineNo),
 	})
 	if err != nil {
-		return fmt.Errorf("billing credit %s:%d: %w", t.OrderNo, t.LineNo, err)
+		return false, fmt.Errorf("billing credit %s:%d: %w", t.OrderNo, t.LineNo, err)
 	}
-	return nil
+
+	// 层二：入账已提交 → done 条件更新。0 行 = 行在此窗口内被并发退款 voided
+	//（复检与 done 之间的亚毫秒残留）——租户对该单既无订单也不该留余额，
+	// 立即冲销补偿。done 更新自身报 DB 错则按失败退避（重放：Credit 同 ref
+	// no-op → done 更新重试；若行彼时已 voided 则走本补偿分支收口）。
+	res := s.db.WithContext(ctx).Exec(
+		"UPDATE fulfillment_tasks SET status = ?, last_error = '' WHERE id = ? AND status = ?",
+		taskStatusDone, t.ID, taskStatusPending)
+	if res.Error != nil {
+		return false, fmt.Errorf("mall-order: complete credit task %d: %w", t.ID, res.Error)
+	}
+	if res.RowsAffected == 1 {
+		return true, nil
+	}
+	s.compensateVoidedCredit(ctx, t, line.TenantID, amount)
+	return false, nil
+}
+
+// compensateVoidedCredit 窗口 R1 防护层二（creditLine 内调用，billing 必已入账）：
+// 以独立冲销 ref `mall-void:{order_no}:{line_no}` 调 billing.Refund 撤回刚入账
+// 的金额（min 口径：若并发消费已花掉部分余额，实退可能 < 金额，以 refunded_cent
+// 如实记日志）。冲销失败不重试——任务行已 voided 不可重放，补偿失败仅 ERROR
+// 日志，交对账检出（billing 侧 mall:* 与 mall-refund:*/mall-void:* 流水交叉
+// 核对，R4 对账 job 落地）。
+func (s *Store) compensateVoidedCredit(ctx context.Context, t fulfillmentTaskRow, tenantID uint64, amountCent int64) {
+	ref := fmt.Sprintf("mall-void:%s:%d", t.OrderNo, t.LineNo)
+	cctx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
+	defer cancel()
+	rep, err := s.billing.Refund(cctx, &billingv1.RefundRequest{
+		TenantId:   int64(tenantID),
+		AmountCent: amountCent,
+		Ref:        ref,
+	})
+	if err != nil {
+		log.Printf("[worker] ERROR 冲销补偿失败（入账后行被退款作废，需对账检出）: order=%s line=%d amount=%d ref=%s: %v",
+			t.OrderNo, t.LineNo, amountCent, ref, err)
+		return
+	}
+	log.Printf("[worker] WARN 冲销补偿执行（入账后行被退款作废）: order=%s line=%d amount=%d refunded=%d ref=%s",
+		t.OrderNo, t.LineNo, amountCent, rep.GetRefundedCent(), ref)
 }
 
 // shipLineMock mock 发货（恒成功）：Store.shipLine 的缺省实现（general 行物流

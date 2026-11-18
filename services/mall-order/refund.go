@@ -34,10 +34,26 @@
 //   - 窗口 C（并发重复退款请求）：两请求对同单同 ref 各自冲退 → billing 侧
 //     uk_ref 恰一条流水；终局事务条件更新 WHERE status=fulfilled 只有一个赢家，
 //     输家锁下复查到 refunded → 幂等 no-op。
+//   - 窗口 R1（退款作废 vs 正在执行的 credit 履约）：worker 批拉 pending 快照
+//     → RefundPaid 作废行+翻 refunded → worker 仍按快照执行 creditLine →
+//     billing.Credit 真实入账 → done 条件更新 0 行静默跳过 → 租户白得余额。
+//     两层防护（worker.creditLine，Fix Round 1）：层一执行前单行复检 pending
+//     （缩窗，已 voided 即静默跳过零副作用）；层二入账提交后 done 更新 0 行
+//     → 立即以独立冲销 ref `mall-void:{order_no}:{line_no}` 调 billing.Refund
+//     补偿 + WARN 日志。残留：复检与 Credit 之间的亚毫秒窗口由补偿兜底；
+//     补偿自身失败不重试（行已 voided 不可重放），ERROR 日志交对账检出
+//     （billing 侧 mall:* 与 mall-refund:*/mall-void:* 流水交叉核对，R4 对账 job）。
+//   - 窗口 R2（done 已标 vs promote 前）：任务行 done（已真实入账）、订单仍
+//     paid → RefundPaid 保留 done 行照常直退 → 租户既留余额又拿退款。
+//     防护（RefundPaid，Fix Round 1）：直退事务内检出 done credit 行 →
+//     MALL_30008 拒绝（可重试），等 promote 推进 fulfilled 后走冲退路径。
+//     残留：MALL_30008 到 promote 完成之间存在短暂"退款暂不可用"，属预期
+//     语义（履约收口中）。
 //
 // 上述所有窗口里 billing 都是幂等提交点，不需要 mall 侧补偿动作（无"先退钱
-// 再失败且无法收敛"的路径）；唯一的代价是窗口 B 期间"账实分离"（billing 已退、
-// mall 未翻），收敛依赖用户重试——R2 接受此取舍（对账 job 属后续里程碑）。
+// 再失败且无法收敛"的路径——R1 的冲销补偿是唯一主动补偿，其失败路径显式留
+// 对账）；唯一的代价是窗口 B 期间"账实分离"（billing 已退、mall 未翻），收敛
+// 依赖用户重试——R2 接受此取舍（对账 job 属后续里程碑）。
 //
 // 幂等：已 refunded 订单重复退款 → no-op（errOrderAlreadyRefunded 哨兵，
 // server 回 200 当前状态）。错误透传（裁定 3）：billing Unavailable →
@@ -99,7 +115,7 @@ func (s *Store) RefundFulfilled(ctx context.Context, tenantID uint64, orderNo st
 	// 避免"冲退到一半撞守卫"的必然失败路径。
 	hasCredit := false
 	for _, it := range items {
-		if it.Type == taskTypeSubscribe {
+		if it.Type == typeSubscription { // 行侧编码 3=subscribe（与 goods.type=3 同值、语义分属两表）
 			// TODO(R2.5)：接入订阅退订语义（不退费=退订）后移除本守卫。
 			return 0, mallerr.E(mallerr.CodeOrderStateInvalid, false,
 				"订阅行退款未实现（R2.5 退订语义）: %s:%d", orderNo, it.LineNo)

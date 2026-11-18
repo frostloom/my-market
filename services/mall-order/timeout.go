@@ -154,10 +154,13 @@ func restockOrder(tx *gorm.DB, orderNo string) error {
 	return nil
 }
 
-// RefundPaid 退款（R1 仅 paid 分支，契约 §5）：
+// RefundPaid 退款（paid 分支，契约 §5 规则 D15）：
 // 作废 pending 履约行（voided，done 行保留）→ paid→refunded 条件更新
 // → paid 流水置 refunded（"退款终态为 refunded，流水另记"口径）。
 // 已 refunded 幂等返回 nil；created/closed/fulfilled → MALL_30002。
+// 守卫（R2-T3 Fix Round 1）：存在 done 的 credit 行 → MALL_30008——已真实
+// 入账而 promote 未完成，直退会保留余额又退款，必须等 fulfilled 后走
+// RefundFulfilled 冲退路径（窗口 R2，见 refund.go 文件头分析）。
 func (s *Store) RefundPaid(ctx context.Context, tenantID uint64, orderNo string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 归属校验 + 锁订单行。
@@ -175,7 +178,21 @@ func (s *Store) RefundPaid(ctx context.Context, tenantID uint64, orderNo string)
 		case orderStatusRefunded:
 			return nil // 幂等：已退款
 		case orderStatusPaid:
-			// R1 唯一合法退款前置态，继续。
+			// 窗口 R2 防护（R2-T3 Fix Round 1 裁定）：存在 done 的 credit 行 =
+			// billing 已真实入账而 promote 未完成（订单停留 paid）。直退会
+			// "保留余额又拿退款"（done 行按既有口径不作废，credit 的钱留在
+			// billing）→ 拒绝 MALL_30008（可重试），等 promote 推进 fulfilled
+			// 后走 RefundFulfilled 冲退路径（mall-refund: ref 正确冲掉入账）。
+			var doneCredit int64
+			if err := tx.Raw(
+				"SELECT COUNT(*) FROM fulfillment_tasks WHERE order_no = ? AND status = ? AND task_type = ?",
+				orderNo, taskStatusDone, taskTypeCredit).Scan(&doneCredit).Error; err != nil {
+				return fmt.Errorf("mall-order: check done credit line %s: %w", orderNo, err)
+			}
+			if doneCredit > 0 {
+				return mallerr.E(mallerr.CodeFulfillmentInProgress, false,
+					"订单履约收口中，暂不可直接退款（已入账待履约收口，请稍后重试）: %s", orderNo)
+			}
 		default:
 			return mallerr.E(mallerr.CodeOrderStateInvalid, false,
 				"订单状态不允许退款: %s（当前 %s，R1 仅 paid 分支）", orderNo, statusName(row.Status))

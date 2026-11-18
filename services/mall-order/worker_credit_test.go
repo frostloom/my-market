@@ -56,15 +56,24 @@ type stubBilling struct {
 	nextCreditReplies []*billingv1.CreditReply
 	// creditErr 非空时 Credit 每次返回该错误（故障注入，走 worker 退避）。
 	creditErr error
+	// onCredit Credit 调用时的副作用钩子（竞态注入：模拟并发退款在 Credit
+	// 提交后作废任务行等现场）；在锁外调用需自行保证幂等。
+	onCredit func(*billingv1.CreditRequest)
 }
 
-func (b *stubBilling) Credit(_ context.Context, req *billingv1.CreditRequest, _ ...grpc.CallOption) (*billingv1.CreditReply, error) {
+func (b *stubBilling) Credit(ctx context.Context, req *billingv1.CreditRequest, _ ...grpc.CallOption) (*billingv1.CreditReply, error) {
+	b.mu.Lock()
+	b.credits = append(b.credits, req)
+	creditErr, hook := b.creditErr, b.onCredit
+	b.mu.Unlock()
+	if hook != nil {
+		hook(req)
+	}
+	if creditErr != nil {
+		return nil, creditErr
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.credits = append(b.credits, req)
-	if b.creditErr != nil {
-		return nil, b.creditErr
-	}
 	if len(b.nextCreditReplies) > 0 {
 		rep := b.nextCreditReplies[0]
 		b.nextCreditReplies = b.nextCreditReplies[1:]
@@ -84,6 +93,12 @@ func (b *stubBilling) creditCalls() []*billingv1.CreditRequest {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]*billingv1.CreditRequest(nil), b.credits...)
+}
+
+func (b *stubBilling) refundCalls() []*billingv1.RefundRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]*billingv1.RefundRequest(nil), b.refunds...)
 }
 
 // recordingBilling 真 billing client 的记录包装：透传每次调用并捕获
@@ -518,6 +533,110 @@ func (e *billingTestEnv) balances(t *testing.T) (ledger int64, column int64, red
 		t.Fatalf("redis balance: %v", err)
 	}
 	return ledger, column, v
+}
+
+// ---------------------------------------------------------------------------
+// 1c. TestWorker_CreditVoidCompensation（Fix Round 1，窗口 R1 两层防护）：
+//   - 层一：执行前复检——任务行已被 voided（并发退款先行）→ 静默跳过，
+//     billing 零触达（不 Credit 也不补偿，钱没入过账无需冲销）；
+//   - 层二：复检通过、billing.Credit 已提交、done 更新 0 行（复检与 done 之间
+//     被并发退款 voided，桩钩子在该窗口注入作废）→ 立即以 mall-void ref 冲销
+//     补偿（金额=face+bonus、tenant 正确）。
+func TestWorker_CreditVoidCompensation(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+
+	t.Run("recheck_skips_voided_before_credit", func(t *testing.T) {
+		ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "cred-void-a")
+		if err != nil {
+			t.Fatalf("CreateRechargeOrder: %v", err)
+		}
+		if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+			TradeNo: "T-cred-void-a", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+			t.Fatalf("MarkPaidTx: %v", err)
+		}
+		// 造竞态结果：RefundPaid 已作废任务行并翻转订单（真实事务同款终态）。
+		if err := s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+			taskStatusVoided, ord.OrderNo).Error; err != nil {
+			t.Fatalf("造 voided 行: %v", err)
+		}
+		if err := s.db.Exec("UPDATE mall_orders SET status = ? WHERE order_no = ?",
+			orderStatusRefunded, ord.OrderNo).Error; err != nil {
+			t.Fatalf("造 refunded 单: %v", err)
+		}
+
+		stub := &stubBilling{}
+		s.billing = stub
+		done, err := s.RunFulfillmentOnce(ctx)
+		if err != nil {
+			t.Fatalf("RunFulfillmentOnce: %v", err)
+		}
+		if done != 0 {
+			t.Fatalf("done = %d，want 0（voided 行静默跳过）", done)
+		}
+		if n := len(stub.creditCalls()) + len(stub.refundCalls()); n != 0 {
+			t.Fatalf("billing 触达 %d 次，want 0（层一复检：未入账不补偿）", n)
+		}
+		for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+			if task.Status != taskStatusVoided {
+				t.Fatalf("任务行 status=%d，want 仍 voided=4", task.Status)
+			}
+		}
+	})
+
+	t.Run("compensates_when_voided_after_credit", func(t *testing.T) {
+		ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "cred-void-b")
+		if err != nil {
+			t.Fatalf("CreateRechargeOrder: %v", err)
+		}
+		wantAmount := ord.Items[0].FaceValueCent + ord.Items[0].BonusCent
+		if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+			TradeNo: "T-cred-void-b", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+			t.Fatalf("MarkPaidTx: %v", err)
+		}
+		// 竞态注入：Credit 提交后、done 标记前，RefundPaid 并发完成（作废行 +
+		// 翻转订单，与真实事务同款终态）——复检已通过、done 更新必 0 行。
+		stub := &stubBilling{onCredit: func(*billingv1.CreditRequest) {
+			_ = s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+				taskStatusVoided, ord.OrderNo).Error
+			_ = s.db.Exec("UPDATE mall_orders SET status = ? WHERE order_no = ?",
+				orderStatusRefunded, ord.OrderNo).Error
+		}}
+		s.billing = stub
+
+		done, err := s.RunFulfillmentOnce(ctx)
+		if err != nil {
+			t.Fatalf("RunFulfillmentOnce: %v", err)
+		}
+		if done != 0 {
+			t.Fatalf("done = %d，want 0（行被 voided，未完成履约收口）", done)
+		}
+		// 入账恰 1 次（billing 已提交），冲销补偿恰 1 次：mall-void ref +
+		// 金额=face+bonus + tenant 取自订单。
+		if n := len(stub.creditCalls()); n != 1 {
+			t.Fatalf("Credit 调用 %d 次，want 1", n)
+		}
+		refunds := stub.refundCalls()
+		if len(refunds) != 1 {
+			t.Fatalf("Refund（冲销补偿）调用 %d 次，want 1", len(refunds))
+		}
+		wantRef := fmt.Sprintf("mall-void:%s:%d", ord.OrderNo, ord.Items[0].LineNo)
+		rep := refunds[0]
+		if rep.GetRef() != wantRef || rep.GetAmountCent() != wantAmount || rep.GetTenantId() != int64(testTenantA) {
+			t.Fatalf("冲销请求 = (ref=%s, amount=%d, tenant=%d)，want (%s, %d, %d)",
+				rep.GetRef(), rep.GetAmountCent(), rep.GetTenantId(), wantRef, wantAmount, testTenantA)
+		}
+		// 任务行保持 voided（不可重放）；订单保持 refunded（冲销已撤回入账）。
+		for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+			if task.Status != taskStatusVoided {
+				t.Fatalf("任务行 status=%d，want 仍 voided=4（不可重放）", task.Status)
+			}
+		}
+		if st, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); st != "refunded" {
+			t.Fatalf("订单 status = %s，want refunded", st)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -164,6 +164,73 @@ func TestRefund_FulfilledRecharge_MinRule(t *testing.T) {
 	})
 }
 
+// TestRefundPaid_RejectsWhenDoneCreditLineExists（Fix Round 1，窗口 R2 防护）：
+// paid 订单存在 done 的 credit 行（已真实入账、promote 未完成）→ 直退拒绝
+// MALL_30008（可重试，等 fulfilled 走冲退路径）；billing 零触达、零副作用。
+// 对照：pending credit 行（未入账）→ 既有直退口径不变（void + refunded）。
+func TestRefundPaid_RejectsWhenDoneCreditLineExists(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+
+	ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "refpaid-guard-1")
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder: %v", err)
+	}
+	if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+		TradeNo: "T-refpaid-guard", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	// 造"已入账、promote 未完成"现场：任务行 done（真实入账在 billing 侧，
+	// 本桩测只关心 mall 侧守卫）。
+	if err := s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+		taskStatusDone, ord.OrderNo).Error; err != nil {
+		t.Fatalf("造 done 行: %v", err)
+	}
+
+	stub := &stubBilling{}
+	s.billing = stub
+	err = s.RefundPaid(ctx, testTenantA, ord.OrderNo)
+	assertMallCode(t, err, mallerr.CodeFulfillmentInProgress)
+	// billing 零触达（直退不冲退入账，守卫在动任何钱之前拒绝）。
+	if n := len(stub.creditCalls()) + len(stub.refundCalls()); n != 0 {
+		t.Fatalf("billing 触达 %d 次，want 0（守卫拒绝，零副作用）", n)
+	}
+	// 零副作用：订单仍 paid、流水仍 paid、任务行仍 done。
+	if st, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); st != "paid" {
+		t.Fatalf("订单 status = %s，want 仍 paid（守卫拒绝不迁移）", st)
+	}
+	if recStatus, _ := paymentRecord(t, s, ord.OrderNo); recStatus != paymentStatusPaid {
+		t.Fatalf("支付流水 status = %d，want 仍 paid=2", recStatus)
+	}
+	for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+		if task.Status != taskStatusDone {
+			t.Fatalf("任务行 status=%d，want 仍 done=2", task.Status)
+		}
+	}
+
+	// 对照：pending credit 行（未入账）→ 既有直退口径不变。
+	ord2, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "refpaid-guard-2")
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder: %v", err)
+	}
+	if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord2.OrderNo, Provider: "mock",
+		TradeNo: "T-refpaid-guard-2", Paid: true, AmountCent: ord2.AmountCent}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	if err := s.RefundPaid(ctx, testTenantA, ord2.OrderNo); err != nil {
+		t.Fatalf("RefundPaid（pending 行）: %v", err)
+	}
+	if st, _ := orderStatusOf(t, s, ctx, testTenantA, ord2.OrderNo); st != "refunded" {
+		t.Fatalf("pending 行直退后 status = %s，want refunded（R1 口径不变）", st)
+	}
+	for _, task := range taskRowsOf(t, s, ord2.OrderNo) {
+		if task.Status != taskStatusVoided {
+			t.Fatalf("pending 任务行 status=%d，want voided=4", task.Status)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 辅助
 
