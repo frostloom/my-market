@@ -82,6 +82,9 @@ func (x *PageReq) GetPageSize() int32 {
 // GoodsItem 商品（列表 / 详情 / 购物车行 / 订单快照引用共用）。
 // type 编码：1=general 2=recharge 3=subscription（契约 §3 的
 // "general|recharge|subscription"）；recharge 附 face_value_cent/bonus_cent。
+// detail 仅详情（GET /goods/{id}）填充；列表项恒为空串（契约 §3）。
+// token_estimate 仅 recharge 填充：按轻量档模型单价把
+// face_value_cent+bonus_cent 换算成 token 数的营销展示，不作入账依据。
 type GoodsItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -95,7 +98,9 @@ type GoodsItem struct {
 	ImageUrl      string                 `protobuf:"bytes,9,opt,name=image_url,json=imageUrl,proto3" json:"image_url,omitempty"`
 	Stock         int32                  `protobuf:"varint,10,opt,name=stock,proto3" json:"stock,omitempty"`
 	OnSale        bool                   `protobuf:"varint,11,opt,name=on_sale,json=onSale,proto3" json:"on_sale,omitempty"`
-	RefPlanId     uint64                 `protobuf:"varint,12,opt,name=ref_plan_id,json=refPlanId,proto3" json:"ref_plan_id,omitempty"` // subscription 引用的订阅套餐 id，其余为 0
+	RefPlanId     uint64                 `protobuf:"varint,12,opt,name=ref_plan_id,json=refPlanId,proto3" json:"ref_plan_id,omitempty"`           // subscription 引用的订阅套餐 id，其余为 0
+	Detail        string                 `protobuf:"bytes,13,opt,name=detail,proto3" json:"detail,omitempty"`                                     // 详情富文本（仅 GetGoods 填充）
+	TokenEstimate int64                  `protobuf:"varint,14,opt,name=token_estimate,json=tokenEstimate,proto3" json:"token_estimate,omitempty"` // recharge 营销展示 token 数（非入账依据）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -214,6 +219,20 @@ func (x *GoodsItem) GetRefPlanId() uint64 {
 	return 0
 }
 
+func (x *GoodsItem) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *GoodsItem) GetTokenEstimate() int64 {
+	if x != nil {
+		return x.TokenEstimate
+	}
+	return 0
+}
+
 // Category 商品品类（六个，精选为运营位）。
 type Category struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -282,7 +301,7 @@ const file_common_proto_rawDesc = "" +
 	"\fcommon.proto\x12\amall.v1\">\n" +
 	"\aPageReq\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\"\xd9\x02\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\"\x98\x03\n" +
 	"\tGoodsItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\x05R\x04type\x12\x12\n" +
@@ -298,7 +317,9 @@ const file_common_proto_rawDesc = "" +
 	"\x05stock\x18\n" +
 	" \x01(\x05R\x05stock\x12\x17\n" +
 	"\aon_sale\x18\v \x01(\bR\x06onSale\x12\x1e\n" +
-	"\vref_plan_id\x18\f \x01(\x04R\trefPlanId\"B\n" +
+	"\vref_plan_id\x18\f \x01(\x04R\trefPlanId\x12\x16\n" +
+	"\x06detail\x18\r \x01(\tR\x06detail\x12%\n" +
+	"\x0etoken_estimate\x18\x0e \x01(\x03R\rtokenEstimate\"B\n" +
 	"\bCategory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
