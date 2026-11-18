@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"gorm.io/gorm"
 )
 

@@ -24,6 +24,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -886,6 +888,193 @@ func (s *Store) refundAmountCash(ctx context.Context, tenantID uint64, amountMon
 		return nil, fmt.Errorf("退款已入账，余额投影待恢复，请使用同一幂等键重试：%w", err)
 	}
 	return &RefundResult{OrderNo: "", AmountCent: target, RefundCent: refund, BalanceAfter: bal - refund}, nil
+}
+
+// ---------- R2 商城充值闭环：Credit / RefundCent（纯新增，不动 Reserve/Settle/Reverse） ----------
+
+// Credit 入账（R2 充值闭环 gRPC 入口）：复用 topups 同步事务路径——
+// topup 行 + tenants.ledger_balance 同事务提交，uk_ref(ref_type, ref_id) 是幂等提交点。
+// 同 ref 重放一律 no-op（created=false，余额不变）；ref 属于其他租户 → FailedPrecondition。
+// amountCent<=0 / ref 非法 → InvalidArgument。返回入账后余额（账本口径，Redis 投影已对齐）。
+func (s *Store) Credit(ctx context.Context, tenantID uint64, amountCent int64, refType, refID string) (int64, bool, error) {
+	if tenantID == 0 {
+		return 0, false, status.Errorf(codes.InvalidArgument, "tenant_id 必须 > 0")
+	}
+	if amountCent <= 0 {
+		return 0, false, status.Errorf(codes.InvalidArgument, "amount_cent 必须 > 0")
+	}
+	// ref_type 兼作 topups.source（VARCHAR(16)）；ref_id 为 VARCHAR(64)。
+	if refType == "" || len(refType) > 16 {
+		return 0, false, status.Errorf(codes.InvalidArgument, "ref_type 长度须为 1-16")
+	}
+	if refID == "" || len(refID) > 64 {
+		return 0, false, status.Errorf(codes.InvalidArgument, "ref_id 长度须为 1-64")
+	}
+	if err := s.requireActiveTenant(ctx, tenantID); err != nil {
+		return 0, false, err
+	}
+	locked, release, err := s.lockCash(ctx, tenantID)
+	if err != nil {
+		return 0, false, err
+	}
+	defer release()
+	return locked.creditCash(locked.cashSQLContext(), tenantID, amountCent, refType, refID)
+}
+
+func (s *Store) creditCash(ctx context.Context, tenantID uint64, amountCent int64, refType, refID string) (int64, bool, error) {
+	// 幂等预读：同 ref 已入账 → no-op 返回当前余额（重放金额差异不动账）。
+	var existing Topup
+	err := s.db.WithContext(ctx).Where("ref_type = ? AND ref_id = ?", refType, refID).First(&existing).Error
+	if err == nil {
+		if existing.TenantID != tenantID {
+			return 0, false, status.Errorf(codes.FailedPrecondition, "ref 已被其他租户使用: %s/%s", refType, refID)
+		}
+		if err := s.requireCashMatch(ctx, tenantID); err != nil {
+			return 0, false, status.Errorf(codes.Unavailable, "已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
+		}
+		bal, balErr := LedgerBalance(ctx, s.db, tenantID)
+		if balErr != nil {
+			return 0, false, balErr
+		}
+		return bal, false, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, err
+	}
+	if err := s.requireCashMatch(ctx, tenantID); err != nil {
+		return 0, false, err
+	}
+	bal, err := LedgerBalance(ctx, s.db, tenantID)
+	if err != nil {
+		return 0, false, err
+	}
+	if bal < 0 || bal > quota.MaxCashLua-amountCent {
+		return 0, false, status.Errorf(codes.FailedPrecondition, "入账后余额超出安全范围")
+	}
+	if err := s.cashMutationAllowed(); err != nil {
+		return 0, false, err
+	}
+	created := false
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inserted, err := insertTopup(tx, &Topup{TenantID: tenantID, Source: refType, Amount: amountCent, RefType: refType, RefID: refID, CreatedAt: time.Now()})
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			// 并发重放撞 uk_ref（提交点被预读到事务之间落库的获胜行占用）。
+			// 口径必须与预读路径一致：复核获胜行租户，跨租户 fail-closed，
+			// 不给错误租户静默 no-op；同租户并发重放才是 no-op。
+			var winner Topup
+			if err := tx.Where("ref_type = ? AND ref_id = ?", refType, refID).First(&winner).Error; err != nil {
+				return err
+			}
+			if winner.TenantID != tenantID {
+				return status.Errorf(codes.FailedPrecondition, "ref 已被其他租户使用: %s/%s", refType, refID)
+			}
+			return nil
+		}
+		created = true
+		return addLedgerBalance(tx, tenantID, amountCent)
+	}); err != nil {
+		return 0, false, err
+	}
+	if err := s.requireCashMatch(ctx, tenantID); err != nil {
+		return 0, false, status.Errorf(codes.Unavailable, "已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
+	}
+	if !created {
+		bal, err = LedgerBalance(ctx, s.db, tenantID)
+		if err != nil {
+			return 0, false, err
+		}
+		return bal, false, nil
+	}
+	return bal + amountCent, true, nil
+}
+
+// RefundCent 按分退款（R2 商城冲退 gRPC 入口）：退款量 = min(amountCent, 当前余额)，绝不退负。
+// ref 是幂等锚点（topups ref_type="refund", ref_id=ref，复用 RefundAmount 同一幂等机制）；
+// 同 ref 重试返回 refunded=0（no-op）；同 ref 不同金额/租户 → FailedPrecondition（与
+// RefundAmount 重放校验同口径）。余额为 0 无可退 → FailedPrecondition。
+func (s *Store) RefundCent(ctx context.Context, tenantID uint64, amountCent int64, ref string) (int64, error) {
+	if tenantID == 0 {
+		return 0, status.Errorf(codes.InvalidArgument, "tenant_id 必须 > 0")
+	}
+	if amountCent <= 0 {
+		return 0, status.Errorf(codes.InvalidArgument, "amount_cent 必须 > 0")
+	}
+	if ref == "" || len(ref) > 64 {
+		return 0, status.Errorf(codes.InvalidArgument, "ref 长度须为 1-64")
+	}
+	if err := s.requireActiveTenant(ctx, tenantID); err != nil {
+		return 0, err
+	}
+	locked, release, err := s.lockCash(ctx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	return locked.refundCentCash(locked.cashSQLContext(), tenantID, amountCent, ref)
+}
+
+func (s *Store) refundCentCash(ctx context.Context, tenantID uint64, amountCent int64, ref string) (int64, error) {
+	// 幂等：同锚点已退过 → 直接返回已退结果（refunded=0），不再动余额。
+	var existing Topup
+	err := s.db.WithContext(ctx).Where("ref_type = ? AND ref_id = ?", TopupRefund, ref).First(&existing).Error
+	if err == nil {
+		if existing.TenantID != tenantID || existing.Source != TopupRefund || existing.RequestedCent == nil || *existing.RequestedCent != amountCent || existing.Amount >= 0 || existing.Amount < -amountCent {
+			return 0, status.Errorf(codes.FailedPrecondition, "退款幂等键冲突或历史请求不可验证")
+		}
+		if err := s.requireCashMatch(ctx, tenantID); err != nil {
+			return 0, status.Errorf(codes.Unavailable, "退款已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
+		}
+		return 0, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	if err := s.requireCashMatch(ctx, tenantID); err != nil {
+		return 0, err
+	}
+	bal, err := LedgerBalance(ctx, s.db, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	refund := min64(amountCent, bal)
+	if refund <= 0 {
+		return 0, status.Errorf(codes.FailedPrecondition, "当前余额为 %d，无可退额度", bal)
+	}
+	if err := s.cashMutationAllowed(); err != nil {
+		return 0, err
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inserted, err := insertTopup(tx, &Topup{TenantID: tenantID, Source: TopupRefund, Amount: -refund, RequestedCent: &amountCent, RefType: TopupRefund, RefID: ref, CreatedAt: time.Now()})
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			return status.Errorf(codes.FailedPrecondition, "退款流水幂等键冲突")
+		}
+		return addLedgerBalance(tx, tenantID, -refund)
+	}); err != nil {
+		return 0, err
+	}
+	if err := s.requireCashMatch(ctx, tenantID); err != nil {
+		return 0, status.Errorf(codes.Unavailable, "退款已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
+	}
+	return refund, nil
+}
+
+// requireActiveTenant 入账/退款前置校验：租户必须存在且未停用（防止孤儿流水/停用租户动账）。
+func (s *Store) requireActiveTenant(ctx context.Context, tenantID uint64) error {
+	var row Tenant
+	if err := s.db.WithContext(ctx).First(&row, tenantID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return status.Errorf(codes.NotFound, "tenant not found: %d", tenantID)
+		}
+		return err
+	}
+	if row.Status != 0 {
+		return status.Errorf(codes.FailedPrecondition, "tenant disabled: %d", tenantID)
+	}
+	return nil
 }
 
 // ---------- 订阅 ----------

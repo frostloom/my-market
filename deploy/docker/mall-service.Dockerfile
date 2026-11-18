@@ -12,9 +12,11 @@
 #   1) 构建上下文 = my-market 仓库根（根模块 github.com/frostloom/my-market），
 #      非 ai-gateway/ 子仓；
 #   2) 根模块 go.mod 要求 go 1.26.0 → 构建镜像用 golang:1.26-alpine（ai 侧 1.25）；
-#   3) 不 COPY go.work 与 ai-gateway/：go.work 会把 ai-gateway 模块拽进 workspace，
-#      而根模块自身并不依赖它（已核实 services/* 仅 import pkg/ + services/mallv1），
-#      镜像内单模块构建 GOWORK=off 即可；ai-gateway/ 目录体量大，进上下文纯属浪费。
+#   3) GOWORK=off 单模块构建；R2 起根模块以 replace ./ai-gateway 依赖
+#      ai-gateway/pkg/proto/billing/v1（billingv1，mall 侧唯一 ai-gateway import
+#      面，importguard 守卫）→ 需同步 COPY 该包与 ai-gateway/go.mod（仅 go.mod
+#      即可，pruned graph 不读 ai-gateway/go.sum；构建依赖 grpc/protobuf 根模块
+#      已 require，无新增下载）。
 #
 # 注意：不要加 `# syntax=docker/dockerfile:1` 指令——那会从 docker.io 拉取 frontend
 # 镜像，国内网络不可达，整个构建会卡死/DeadlineExceeded（ai 侧 2026-11-18 实测两次）。
@@ -31,6 +33,10 @@ ENV GOPROXY=https://goproxy.cn,direct \
 WORKDIR /src
 ARG SVC
 COPY go.mod go.sum ./
+# R2：mall-order/mall-bff import billingv1（replace ./ai-gateway）→ 需被替换
+# 模块的 go.mod + import 面（仅 pkg/proto/billing；不整拷 ai-gateway/）。
+COPY ai-gateway/go.mod ./ai-gateway/go.mod
+COPY ai-gateway/pkg/proto/billing ./ai-gateway/pkg/proto/billing
 RUN go mod download
 # 根模块构建面：pkg/（mallerr/mallpage 公共库）+ proto/（契约 .proto 源）+
 # services/（mallv1 生成码 + 各服务入口）。go.work / ai-gateway/ 刻意不进镜像。

@@ -43,6 +43,8 @@ type App struct {
 	sessions *sessionCache
 	goods    GoodsClient
 	orders   OrderClient
+	billing  BillingClient // billing gRPC（/me/overview 余额；handler_me.go）
+	topups   TopupsSource  // billing admin 流水（/me/overview 最近 10 条）
 	provider PayProvider
 	rdb      *redis.Client
 	closeFns []func()
@@ -59,9 +61,10 @@ func (a *App) Close() error {
 	return nil
 }
 
-// NewApp 装配路由。goods/orders 为接口（gclient.go）：生产传 gRPC client，
-// 测试传桩。rdb 为 nil 时限流 fail-open 全放行（无 Redis 的最小运行）。
-func NewApp(cfg Config, goods GoodsClient, orders OrderClient, rdb *redis.Client) *App {
+// NewApp 装配路由。goods/orders/billing 为接口（gclient.go / handler_me.go）：
+// 生产传 gRPC client / admin HTTP client，测试传桩。rdb 为 nil 时限流
+// fail-open 全放行（无 Redis 的最小运行）。
+func NewApp(cfg Config, goods GoodsClient, orders OrderClient, billing BillingClient, topups TopupsSource, rdb *redis.Client) *App {
 	log := slog.Default()
 	if cfg.RateLimitPerMin <= 0 {
 		cfg.RateLimitPerMin = 120
@@ -80,6 +83,8 @@ func NewApp(cfg Config, goods GoodsClient, orders OrderClient, rdb *redis.Client
 		sessions: newSessionCache(cfg.AuthCacheTTL),
 		goods:    goods,
 		orders:   orders,
+		billing:  billing,
+		topups:   topups,
 		rdb:      rdb,
 	}
 	// 不信任任何代理头：gin 默认信任所有代理，X-Forwarded-For 可伪造——
@@ -139,7 +144,10 @@ func NewApp(cfg Config, goods GoodsClient, orders OrderClient, rdb *redis.Client
 	authed.POST("/orders/:no/cancel", handleCancelOrder(orders))
 	authed.POST("/orders/:no/refund", handleRefundOrder(orders))
 
-	// 未注册路径（含 §6 秒杀 R4、§7 /me/overview R2——后续轮交付）：
+	// 我的信息（§7）：余额 + 最近 10 条流水；subscription R2.5 前恒 null。
+	authed.GET("/me/overview", handleMeOverview(billing, topups))
+
+	// 未注册路径（含 §6 秒杀 R4——后续轮交付）：
 	// 保持统一错误形状（gin 默认 404 空体会破坏契约 §0.2）。
 	a.engine.NoRoute(func(c *gin.Context) {
 		// 契约错误表无"路由不存在"码；取参数校验码 + 404（前端不应打到此处）。

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // 有标价但估算金额取整为 0 时，余额路径至少预扣 1 分；余额不够则拒绝，不落行。

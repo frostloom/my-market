@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/frostloom/ai-gateway/internal/pkg/quota"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // 计价数学：cost = (prompt×in + completion×out) / 1_000_000（分，向下取整）。

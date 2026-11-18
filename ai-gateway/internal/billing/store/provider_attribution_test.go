@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

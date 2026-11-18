@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 func countOutboxRows(s *Store, where string, args ...any) int64 {

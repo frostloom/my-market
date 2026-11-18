@@ -26,7 +26,7 @@ import (
 	"github.com/frostloom/ai-gateway/internal/pkg/kafka"
 	"github.com/frostloom/ai-gateway/internal/pkg/logger"
 	"github.com/frostloom/ai-gateway/internal/pkg/redisx"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // kafkaLedgerSink 把每笔请求日志写入 billing.events。key 用租户，同一用户的明细进同一分区。

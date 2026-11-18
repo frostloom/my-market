@@ -19,16 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OrderService_CreateCartOrder_FullMethodName = "/mall.v1.OrderService/CreateCartOrder"
-	OrderService_GetOrder_FullMethodName        = "/mall.v1.OrderService/GetOrder"
-	OrderService_ListOrders_FullMethodName      = "/mall.v1.OrderService/ListOrders"
-	OrderService_MarkPaid_FullMethodName        = "/mall.v1.OrderService/MarkPaid"
-	OrderService_CancelOrder_FullMethodName     = "/mall.v1.OrderService/CancelOrder"
-	OrderService_RefundOrder_FullMethodName     = "/mall.v1.OrderService/RefundOrder"
-	OrderService_GetCart_FullMethodName         = "/mall.v1.OrderService/GetCart"
-	OrderService_AddCart_FullMethodName         = "/mall.v1.OrderService/AddCart"
-	OrderService_PatchCartQty_FullMethodName    = "/mall.v1.OrderService/PatchCartQty"
-	OrderService_RemoveCart_FullMethodName      = "/mall.v1.OrderService/RemoveCart"
+	OrderService_CreateCartOrder_FullMethodName     = "/mall.v1.OrderService/CreateCartOrder"
+	OrderService_CreateRechargeOrder_FullMethodName = "/mall.v1.OrderService/CreateRechargeOrder"
+	OrderService_GetOrder_FullMethodName            = "/mall.v1.OrderService/GetOrder"
+	OrderService_ListOrders_FullMethodName          = "/mall.v1.OrderService/ListOrders"
+	OrderService_MarkPaid_FullMethodName            = "/mall.v1.OrderService/MarkPaid"
+	OrderService_CancelOrder_FullMethodName         = "/mall.v1.OrderService/CancelOrder"
+	OrderService_RefundOrder_FullMethodName         = "/mall.v1.OrderService/RefundOrder"
+	OrderService_GetCart_FullMethodName             = "/mall.v1.OrderService/GetCart"
+	OrderService_AddCart_FullMethodName             = "/mall.v1.OrderService/AddCart"
+	OrderService_PatchCartQty_FullMethodName        = "/mall.v1.OrderService/PatchCartQty"
+	OrderService_RemoveCart_FullMethodName          = "/mall.v1.OrderService/RemoveCart"
 )
 
 // OrderServiceClient is the client API for OrderService service.
@@ -41,6 +42,9 @@ type OrderServiceClient interface {
 	// 建单：recharge 直购建单，cart 结算建混合单（general+subscription，
 	// 行级价格快照，事务内同库直扣 general 行库存）；契约 POST /orders。
 	CreateCartOrder(ctx context.Context, in *CreateCartOrderReq, opts ...grpc.CallOption) (*OrderReply, error)
+	// recharge 直购建单（kind=1，单行 type=credit，goods 类型校验在本服务端）；
+	// 契约 POST /orders kind=recharge 分支。
+	CreateRechargeOrder(ctx context.Context, in *CreateRechargeOrderReq, opts ...grpc.CallOption) (*OrderReply, error)
 	// 单笔订单；契约 GET /orders/{no}（App 轮询履约结果用）。
 	GetOrder(ctx context.Context, in *GetOrderReq, opts ...grpc.CallOption) (*OrderReply, error)
 	// 订单列表（游标分页）；契约 GET /orders?cursor=。
@@ -72,6 +76,16 @@ func (c *orderServiceClient) CreateCartOrder(ctx context.Context, in *CreateCart
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(OrderReply)
 	err := c.cc.Invoke(ctx, OrderService_CreateCartOrder_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orderServiceClient) CreateRechargeOrder(ctx context.Context, in *CreateRechargeOrderReq, opts ...grpc.CallOption) (*OrderReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OrderReply)
+	err := c.cc.Invoke(ctx, OrderService_CreateRechargeOrder_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +192,9 @@ type OrderServiceServer interface {
 	// 建单：recharge 直购建单，cart 结算建混合单（general+subscription，
 	// 行级价格快照，事务内同库直扣 general 行库存）；契约 POST /orders。
 	CreateCartOrder(context.Context, *CreateCartOrderReq) (*OrderReply, error)
+	// recharge 直购建单（kind=1，单行 type=credit，goods 类型校验在本服务端）；
+	// 契约 POST /orders kind=recharge 分支。
+	CreateRechargeOrder(context.Context, *CreateRechargeOrderReq) (*OrderReply, error)
 	// 单笔订单；契约 GET /orders/{no}（App 轮询履约结果用）。
 	GetOrder(context.Context, *GetOrderReq) (*OrderReply, error)
 	// 订单列表（游标分页）；契约 GET /orders?cursor=。
@@ -207,6 +224,9 @@ type UnimplementedOrderServiceServer struct{}
 
 func (UnimplementedOrderServiceServer) CreateCartOrder(context.Context, *CreateCartOrderReq) (*OrderReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateCartOrder not implemented")
+}
+func (UnimplementedOrderServiceServer) CreateRechargeOrder(context.Context, *CreateRechargeOrderReq) (*OrderReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRechargeOrder not implemented")
 }
 func (UnimplementedOrderServiceServer) GetOrder(context.Context, *GetOrderReq) (*OrderReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetOrder not implemented")
@@ -270,6 +290,24 @@ func _OrderService_CreateCartOrder_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(OrderServiceServer).CreateCartOrder(ctx, req.(*CreateCartOrderReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrderService_CreateRechargeOrder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRechargeOrderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrderServiceServer).CreateRechargeOrder(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrderService_CreateRechargeOrder_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrderServiceServer).CreateRechargeOrder(ctx, req.(*CreateRechargeOrderReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -446,6 +484,10 @@ var OrderService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateCartOrder",
 			Handler:    _OrderService_CreateCartOrder_Handler,
+		},
+		{
+			MethodName: "CreateRechargeOrder",
+			Handler:    _OrderService_CreateRechargeOrder_Handler,
 		},
 		{
 			MethodName: "GetOrder",

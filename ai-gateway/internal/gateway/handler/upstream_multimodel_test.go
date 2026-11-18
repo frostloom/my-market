@@ -21,7 +21,7 @@ import (
 
 	"github.com/frostloom/ai-gateway/internal/gateway/client"
 	"github.com/frostloom/ai-gateway/internal/gateway/middleware"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 type multiModelAuthServer struct {

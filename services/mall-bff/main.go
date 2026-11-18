@@ -7,6 +7,9 @@
 //	GOODS_ADDR          默认 127.0.0.1:9111
 //	ORDER_ADDR          默认 127.0.0.1:9112
 //	GATEWAY_ADDR        默认 http://127.0.0.1:18080（会话链路 /auth/*，D14）
+//	BILLING_ADDR        默认 127.0.0.1:9101（billing gRPC；/me/overview 余额）
+//	BILLING_ADMIN_ADDR  默认 http://127.0.0.1:9103（admin HTTP；流水最近 10 条）
+//	CONTROL_PLANE_TOKEN 必填——billing gRPC/admin HTTP 鉴权（compose 双侧注入）
 //	REDIS_ADDR          默认 127.0.0.1:6381（dev Redis 容器映射口）
 //	PAY_CALLBACK_SECRET 必填——/payments/callback 验签与 mock provider 签名
 //	                    共用的 HMAC 密钥（openssl rand -hex 32；.env.example 有模板）
@@ -56,6 +59,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("连接 mall-order 失败: %v", err)
 	}
+	// billing 两侧（R2 overview）：gRPC 余额 + admin HTTP 流水。
+	// CONTROL_PLANE_TOKEN 未设置即退出（fail-closed，见 handler_me.go）。
+	billing, closeBilling, err := dialBillingFromEnv()
+	if err != nil {
+		log.Fatalf("连接 billing 失败: %v", err)
+	}
+	topups, err := newAdminTopupsFromEnv()
+	if err != nil {
+		closeBilling()
+		log.Fatalf("配置 billing admin 失败: %v", err)
+	}
 	rdb := redis.NewClient(&redis.Options{
 		Addr: envOr("REDIS_ADDR", "127.0.0.1:6381"),
 	})
@@ -66,7 +80,7 @@ func main() {
 	}
 	cancelPing()
 
-	app := NewApp(cfg, goods, orders, rdb)
+	app := NewApp(cfg, goods, orders, billing, topups, rdb)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -75,8 +89,9 @@ func main() {
 	}
 	lnErr := make(chan error, 1)
 	go func() { lnErr <- srv.ListenAndServe() }()
-	log.Printf("mall-bff 起服务：%s（/api/v1 + /healthz）；gateway=%s goods=%s order=%s redis=%s",
-		cfg.Addr, cfg.GatewayBase, envOr("GOODS_ADDR", "127.0.0.1:9111"), envOr("ORDER_ADDR", "127.0.0.1:9112"), rdb.Options().Addr)
+	log.Printf("mall-bff 起服务：%s（/api/v1 + /healthz）；gateway=%s goods=%s order=%s billing=%s admin=%s redis=%s",
+		cfg.Addr, cfg.GatewayBase, envOr("GOODS_ADDR", "127.0.0.1:9111"), envOr("ORDER_ADDR", "127.0.0.1:9112"),
+		envOr("BILLING_ADDR", "127.0.0.1:9101"), envOr("BILLING_ADMIN_ADDR", "http://127.0.0.1:9103"), rdb.Options().Addr)
 
 	// 优雅退出：SIGINT/SIGTERM → 停 HTTP → 关下游连接/Redis。
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -95,6 +110,7 @@ func main() {
 	_ = app.Close()
 	closeGoods()
 	closeOrder()
+	closeBilling()
 	_ = rdb.Close()
 }
 

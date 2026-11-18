@@ -24,7 +24,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/frostloom/ai-gateway/internal/billing/store"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // Stats 一轮对账的结果（供日志/集成测试断言）。

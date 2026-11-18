@@ -13,6 +13,10 @@ service OrderService {
   // 行级价格快照，事务内同库直扣 general 行库存）；契约 POST /orders。
   rpc CreateCartOrder(CreateCartOrderReq) returns (OrderReply);
 
+  // recharge 直购建单（kind=1，单行 type=credit，goods 类型校验在本服务端）；
+  // 契约 POST /orders kind=recharge 分支。
+  rpc CreateRechargeOrder(CreateRechargeOrderReq) returns (OrderReply);
+
   // 单笔订单；契约 GET /orders/{no}（App 轮询履约结果用）。
   rpc GetOrder(GetOrderReq) returns (OrderReply);
 
@@ -50,6 +54,16 @@ message CreateCartOrderReq {
   uint64 tenant_id = 1;
   string idem_key = 2;
   repeated Line lines = 3;
+}
+
+// CreateRechargeOrderReq recharge 直购建单请求（纯加法新增消息，field 号 1..3）。
+// idem_key 语义与 CreateCartOrderReq 一致：作用域 (tenant_id, key)，
+// payload 指纹 = goods_id（同 key 同 goods 返回原单，不同 goods 拒绝 MALL_30003）。
+// goods 类型校验（type=2 recharge 才可直购）在 order 服务端，bff 只透传。
+message CreateRechargeOrderReq {
+  uint64 tenant_id = 1;
+  uint64 goods_id = 2;
+  string idem_key = 3;
 }
 
 // GetOrderReq 订单号 + 调用方 tenant（服务端校验隔离）。

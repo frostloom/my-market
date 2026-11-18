@@ -16,7 +16,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/frostloom/ai-gateway/internal/pkg/config"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // 并发不超卖测试必须在真 Redis + 真 MySQL 上跑（miniredis 单线程测不出真竞态）。

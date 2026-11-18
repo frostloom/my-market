@@ -134,22 +134,35 @@ func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bo
 }
 
 // restockOrder 回补订单行库存（事务内；行快照 qty 按商品累回）。
+// 回补范围 = 建单时实际扣过库存的行，与扣减对称：
+//   - kind=2（cart 结算）：建单全行无条件直扣 → 全行回补（既有口径）；
+//   - kind=1（recharge 直购，R2-T2）：仅 limited=1 商品建单时条件扣减，
+//     无限量档（limited=0）建单不碰库存 → 取消/超时同样不得回补
+//     （否则 stock 虚增、污染种子锚点——TestCancelRechargeOrder_RestockMatchesDeduction）；
+//   - 其他 kind（如未来的 seckill）：按 limited=1 行保守回补；接入时若扣减
+//     口径不同，需同步此处。
+// 注意：对称依据是 goods.limited 的**当前值**而非建单时快照；若 recharge
+// 商品在单据存续期内翻转 limited，存在少补/多补一枚的理论窗口（已记台账）。
 func restockOrder(tx *gorm.DB, orderNo string) error {
 	res := tx.Exec(
 		"UPDATE goods g "+
 			"JOIN mall_order_items i ON i.goods_id = g.id "+
+			"JOIN mall_orders o ON o.order_no = i.order_no "+
 			"SET g.stock = g.stock + i.qty "+
-			"WHERE i.order_no = ?", orderNo)
+			"WHERE i.order_no = ? AND (o.kind = 2 OR g.limited = 1)", orderNo)
 	if res.Error != nil {
 		return fmt.Errorf("mall-order: restock %s: %w", orderNo, res.Error)
 	}
 	return nil
 }
 
-// RefundPaid 退款（R1 仅 paid 分支，契约 §5）：
+// RefundPaid 退款（paid 分支，契约 §5 规则 D15）：
 // 作废 pending 履约行（voided，done 行保留）→ paid→refunded 条件更新
 // → paid 流水置 refunded（"退款终态为 refunded，流水另记"口径）。
 // 已 refunded 幂等返回 nil；created/closed/fulfilled → MALL_30002。
+// 守卫（R2-T3 Fix Round 1）：存在 done 的 credit 行 → MALL_30008——已真实
+// 入账而 promote 未完成，直退会保留余额又退款，必须等 fulfilled 后走
+// RefundFulfilled 冲退路径（窗口 R2，见 refund.go 文件头分析）。
 func (s *Store) RefundPaid(ctx context.Context, tenantID uint64, orderNo string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 归属校验 + 锁订单行。
@@ -167,7 +180,23 @@ func (s *Store) RefundPaid(ctx context.Context, tenantID uint64, orderNo string)
 		case orderStatusRefunded:
 			return nil // 幂等：已退款
 		case orderStatusPaid:
-			// R1 唯一合法退款前置态，继续。
+			// 窗口 R2 防护（R2-T3 Fix Round 1 裁定）：存在 done 的 credit 行 =
+			// billing 已真实入账而 promote 未完成（订单停留 paid）。直退会
+			// "保留余额又拿退款"（done 行按既有口径不作废，credit 的钱留在
+			// billing）→ 拒绝 MALL_30008（可重试），等 promote 推进 fulfilled
+			// 后走 RefundFulfilled 冲退路径（mall-refund: ref 正确冲掉入账）。
+			// 前置守卫为快照快速通道；void 后 FOR UPDATE 复查收口 TOCTOU
+			// （见下方 1.5，Fix Round 2）。
+			var doneCredit int64
+			if err := tx.Raw(
+				"SELECT COUNT(*) FROM fulfillment_tasks WHERE order_no = ? AND status = ? AND task_type = ?",
+				orderNo, taskStatusDone, taskTypeCredit).Scan(&doneCredit).Error; err != nil {
+				return fmt.Errorf("mall-order: check done credit line %s: %w", orderNo, err)
+			}
+			if doneCredit > 0 {
+				return mallerr.E(mallerr.CodeFulfillmentInProgress, false,
+					"订单履约收口中，暂不可直接退款（已入账待履约收口，请稍后重试）: %s", orderNo)
+			}
 		default:
 			return mallerr.E(mallerr.CodeOrderStateInvalid, false,
 				"订单状态不允许退款: %s（当前 %s，R1 仅 paid 分支）", orderNo, statusName(row.Status))
@@ -178,6 +207,28 @@ func (s *Store) RefundPaid(ctx context.Context, tenantID uint64, orderNo string)
 			"UPDATE fulfillment_tasks SET status = ? WHERE order_no = ? AND status = ?",
 			taskStatusVoided, orderNo, taskStatusPending).Error; err != nil {
 			return fmt.Errorf("mall-order: void fulfillment %s: %w", orderNo, err)
+		}
+		// 1.5) void 后复查（TOCTOU 收口，Fix Round 2）：前置守卫 COUNT 是快照
+		// 读、任务行未锁，"worker done 先于本事务 void 提交"的交错仍可漏过——
+		// worker 层一复检通过 → Credit 提交 → done 先提交 → 本事务守卫读到
+		// pending 放行 → void 匹配 0 行 → 订单翻 refunded 而 done credit 行在
+		// （双得余额，且 worker done 已成功不触发 mall-void 补偿）。故 void 之后
+		// 以 FOR UPDATE 锁读复查：锁读是 current read（REPEATABLE READ 下普通
+		// SELECT 仍读事务快照，看不到刚提交的 done 行；锁读才见最新已提交版本，
+		// 含本事务自己 voided 的行）。>0 → 返回 MALL_30008 整体回滚（void/翻转
+		// 一并撤销，done 行已可见拒绝成立，等 promote→fulfilled 走冲退）；
+		// =0 → 照常继续。两种交错各自收敛：done 落 void 前 → 本复查拒绝；
+		// done 落 void 后 → void 匹配到 pending 行、worker done 条件更新 0 行
+		// 走 mall-void 补偿（worker.creditLine 层二）。
+		var doneCreditAfterVoid int64
+		if err := tx.Raw(
+			"SELECT COUNT(*) FROM fulfillment_tasks WHERE order_no = ? AND status = ? AND task_type = ? FOR UPDATE",
+			orderNo, taskStatusDone, taskTypeCredit).Scan(&doneCreditAfterVoid).Error; err != nil {
+			return fmt.Errorf("mall-order: recheck done credit line %s: %w", orderNo, err)
+		}
+		if doneCreditAfterVoid > 0 {
+			return mallerr.E(mallerr.CodeFulfillmentInProgress, false,
+				"订单履约收口中，暂不可直接退款（已入账待履约收口，请稍后重试）: %s", orderNo)
 		}
 		// 2) paid→refunded 条件更新。
 		if err := tx.Exec(

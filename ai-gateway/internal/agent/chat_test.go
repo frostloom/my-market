@@ -23,7 +23,7 @@ import (
 
 	"github.com/frostloom/ai-gateway/internal/billing/store"
 	"github.com/frostloom/ai-gateway/internal/pkg/config"
-	billingv1 "github.com/frostloom/ai-gateway/internal/proto/billing/v1"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // agent 运行时单测：假 LLM 脚本化 tool_call + 假 billing admin（httptest 本地回环），

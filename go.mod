@@ -3,7 +3,11 @@ module github.com/frostloom/my-market
 go 1.26.0
 
 require (
-	github.com/go-sql-driver/mysql v1.8.1
+	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/frostloom/ai-gateway v0.0.0
+	github.com/gin-gonic/gin v1.12.0
+	github.com/go-sql-driver/mysql v1.10.0
+	github.com/redis/go-redis/v9 v9.23.0
 	golang.org/x/sync v0.25.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1
 	google.golang.org/grpc v1.84.0
@@ -12,9 +16,14 @@ require (
 	gorm.io/gorm v1.31.2
 )
 
+// billingv1（ai-gateway/pkg/proto/billing/v1）是 mall 侧唯一允许的
+// ai-gateway import 面（importguard 守卫）。本地开发走 go.work workspace；
+// replace 供容器内 GOWORK=off 构建（Dockerfile 同步 COPY 该目录，见
+// deploy/docker/mall-service.Dockerfile）。
+replace github.com/frostloom/ai-gateway => ./ai-gateway
+
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/alicebob/miniredis/v2 v2.40.0 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -22,7 +31,6 @@ require (
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/gin-gonic/gin v1.12.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
@@ -39,7 +47,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
-	github.com/redis/go-redis/v9 v9.23.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
