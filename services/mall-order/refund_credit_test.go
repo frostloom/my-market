@@ -231,6 +231,54 @@ func TestRefundPaid_RejectsWhenDoneCreditLineExists(t *testing.T) {
 	}
 }
 
+// TestRefundPaid_VoidThenDoneRace_ClosedByRecheck（Fix Round 2，TOCTOU 收口）：
+// "worker done 与 RefundPaid void 交错"构型——paid 单 + credit 行，事务外模拟
+// worker 抢先提交 done（直接 UPDATE 行 done、订单仍 paid，等价于守卫读到
+// pending 后、void 前该行已 done）→ RefundPaid 必须 MALL_30008 且订单停留
+// paid、流水/行零污染、billing 零触达（守卫拒绝成立：done 行已可见，等
+// promote→fulfilled 走冲退；不产生"翻 refunded 而 done 行在"的双得余额态）。
+// 注：事务内"守卫读到 pending、void 前才提交 done"的真并发交错无法单线程
+// 直构；复查用 FOR UPDATE 锁读（current read）保证任何已提交的 done 在 void
+// 后必可见——两种交错的收敛推理见 timeout.go 1.5 与 refund.go 文件头。
+func TestRefundPaid_VoidThenDoneRace_ClosedByRecheck(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+
+	ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "refpaid-race-1")
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder: %v", err)
+	}
+	if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+		TradeNo: "T-refpaid-race", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	// 交错现场：worker done 已提交（行 done）、订单仍 paid（promote 未跑）。
+	if err := s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+		taskStatusDone, ord.OrderNo).Error; err != nil {
+		t.Fatalf("造 done 行: %v", err)
+	}
+
+	stub := &stubBilling{}
+	s.billing = stub
+	err = s.RefundPaid(ctx, testTenantA, ord.OrderNo)
+	assertMallCode(t, err, mallerr.CodeFulfillmentInProgress)
+	if n := len(stub.creditCalls()) + len(stub.refundCalls()); n != 0 {
+		t.Fatalf("billing 触达 %d 次，want 0（守卫/复查拒绝，零副作用）", n)
+	}
+	if st, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); st != "paid" {
+		t.Fatalf("订单 status = %s，want 仍 paid（拒绝回滚，不翻 refunded）", st)
+	}
+	if recStatus, _ := paymentRecord(t, s, ord.OrderNo); recStatus != paymentStatusPaid {
+		t.Fatalf("支付流水 status = %d，want 仍 paid=2", recStatus)
+	}
+	for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+		if task.Status != taskStatusDone {
+			t.Fatalf("任务行 status=%d，want 仍 done=2（未被 void 污染）", task.Status)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 辅助
 

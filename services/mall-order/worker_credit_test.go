@@ -639,6 +639,51 @@ func TestWorker_CreditVoidCompensation(t *testing.T) {
 	})
 }
 
+// TestCreditLine_RecheckSkipsNonPending（Fix Round 2）：直调 creditLine 的
+// 层一复检分支——任务行已被并发退款 voided 时返回 (false, nil)、billing
+// Credit/Refund 双零触达（未入账不补偿）、任务行保持 voided。
+func TestCreditLine_RecheckSkipsNonPending(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+
+	ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "cred-recheck-1")
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder: %v", err)
+	}
+	if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+		TradeNo: "T-cred-recheck", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	// 竞态先行结果：任务行已 voided（RefundPaid 已作废并翻转订单）。
+	if err := s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+		taskStatusVoided, ord.OrderNo).Error; err != nil {
+		t.Fatalf("造 voided 行: %v", err)
+	}
+	var trow fulfillmentTaskRow
+	if err := s.db.Where("order_no = ?", ord.OrderNo).First(&trow).Error; err != nil {
+		t.Fatalf("load task row: %v", err)
+	}
+
+	stub := &stubBilling{}
+	s.billing = stub
+	marked, err := s.creditLine(ctx, trow)
+	if err != nil {
+		t.Fatalf("creditLine: %v（voided 行应静默跳过）", err)
+	}
+	if marked {
+		t.Fatalf("marked = true，want false（行非 pending，未履约）")
+	}
+	if n := len(stub.creditCalls()) + len(stub.refundCalls()); n != 0 {
+		t.Fatalf("billing 触达 %d 次，want 0（层一复检：零触达）", n)
+	}
+	for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+		if task.Status != taskStatusVoided {
+			t.Fatalf("任务行 status=%d，want 仍 voided=4", task.Status)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 2. TestWorker_CreditCrashReplay_ExactlyOneTopup（真 billing）：paid+pending
 // credit 行 → RunOnce（入账+done）→ 把任务行打回 pending（模拟"billing 已入账、

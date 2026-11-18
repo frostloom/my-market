@@ -47,8 +47,15 @@
 //     paid → RefundPaid 保留 done 行照常直退 → 租户既留余额又拿退款。
 //     防护（RefundPaid，Fix Round 1）：直退事务内检出 done credit 行 →
 //     MALL_30008 拒绝（可重试），等 promote 推进 fulfilled 后走冲退路径。
-//     残留：MALL_30008 到 promote 完成之间存在短暂"退款暂不可用"，属预期
-//     语义（履约收口中）。
+//     TOCTOU 收口（Fix Round 2）：前置守卫 COUNT 是快照读、任务行未锁——
+//     "worker done 先于本事务 void 提交"的交错仍可漏过（守卫读到 pending 放行
+//     → void 匹配 0 行 → 翻 refunded 而 done 行在，且 worker done 已成功不触发
+//     mall-void 补偿）。故 void UPDATE 之后同一事务以 FOR UPDATE 锁读重跑
+//     done-credit COUNT（锁读 = current read，才见刚提交的 done 行；普通 SELECT
+//     在 REPEATABLE READ 下仍读事务快照）→ >0 整体回滚并 MALL_30008。
+//     两种交错各自收敛：done 落 void 前 → 复查拒绝；done 落 void 后 → void
+//     匹配 pending 行、worker done 0 行走 mall-void 补偿。残留：MALL_30008 到
+//     promote 完成之间存在短暂"退款暂不可用"，属预期语义（履约收口中）。
 //
 // 上述所有窗口里 billing 都是幂等提交点，不需要 mall 侧补偿动作（无"先退钱
 // 再失败且无法收敛"的路径——R1 的冲销补偿是唯一主动补偿，其失败路径显式留
