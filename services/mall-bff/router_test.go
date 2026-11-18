@@ -223,19 +223,23 @@ func (s *stubOrder) markPaidCalls() []*mallv1.MarkPaidReq {
 // App 测试装配（miniredis 撑限流；cfg 项测试可覆写）
 
 type appFixture struct {
-	app  *App
-	gw   *fakeGateway
-	good *stubGoods
-	ord  *stubOrder
-	mr   *miniredis.Miniredis
+	app     *App
+	gw      *fakeGateway
+	good    *stubGoods
+	ord     *stubOrder
+	billing *stubBilling
+	topups  *stubTopups
+	mr      *miniredis.Miniredis
 }
 
 func newTestApp(t *testing.T, mutate func(*Config)) *appFixture {
 	t.Helper()
 	fx := &appFixture{
-		gw:   newFakeGateway(t),
-		good: &stubGoods{},
-		ord:  &stubOrder{},
+		gw:      newFakeGateway(t),
+		good:    &stubGoods{},
+		ord:     &stubOrder{},
+		billing: &stubBilling{},
+		topups:  &stubTopups{},
 	}
 	fx.mr = miniredis.RunT(t)
 	cfg := Config{
@@ -250,7 +254,7 @@ func newTestApp(t *testing.T, mutate func(*Config)) *appFixture {
 	if mutate != nil {
 		mutate(&cfg)
 	}
-	fx.app = NewApp(cfg, fx.good, fx.ord, redis.NewClient(&redis.Options{Addr: fx.mr.Addr()}))
+	fx.app = NewApp(cfg, fx.good, fx.ord, fx.billing, fx.topups, redis.NewClient(&redis.Options{Addr: fx.mr.Addr()}))
 	t.Cleanup(func() { _ = fx.app.Close() })
 	return fx
 }
