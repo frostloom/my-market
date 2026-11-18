@@ -1,13 +1,16 @@
-# my-market 分 profile compose（R0）。
+# my-market 分 profile compose（R0 infra+ai / R1 mall）。
 #   infra：MySQL(3307, utf8mb4) / Redis(6381) / Kafka(宿主 29092) —— 端口与旧 ai-gateway compose 一致
 #   ai：   gateway / billing / router / agent / mock-provider（本地构建，共享 ai-gateway/deploy/docker/go-service.Dockerfile）
-#   R1 将追加 mall profile。
+#   mall： mall-goods(gRPC 9111/健康口 9110) / mall-order(9112/9120) / mall-bff(18090)
+#          （本地构建，deploy/docker/mall-service.Dockerfile，上下文=仓库根）
 #
 # 用法：
-#   cp deploy/compose/.env.example deploy/compose/.env   # 先填 CONTROL_PLANE_TOKEN（生成命令见模板注释）
+#   cp deploy/compose/.env.example deploy/compose/.env   # 先填 CONTROL_PLANE_TOKEN / PAY_CALLBACK_SECRET（生成命令见模板注释）
 #   docker compose -f deploy/compose/docker-compose.yml --profile infra up -d
 #   docker compose -f deploy/compose/docker-compose.yml --profile ai up -d
-#   （两个 profile 可合用：--profile infra --profile ai up -d）
+#   docker compose -f deploy/compose/docker-compose.yml --profile mall up -d
+#   （三个 profile 可合用：--profile infra --profile ai --profile mall up -d；
+#     mall-bff 的会话链路依赖 ai 组的 gateway:18080 —— 全家桶起法见 scripts/smoke-r1.sh 前置检查）
 #
 # 机器侧副作用（2026-11-18 首次起栈时处理）：旧仓遗留容器 ai-gateway-mysql / ai-gateway-redis /
 # ai-gateway-kafka 占着宿主 3307/6381/29092，与本栈端口冲突，已 docker stop（未删除，数据卷保留）。
@@ -271,6 +274,110 @@ services:
       - "${MOCK_PROVIDER_PORT:-9201}:${MOCK_PROVIDER_PORT:-9201}"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:${MOCK_PROVIDER_PORT:-9201}/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  # ================= mall（R1）=================
+  # 三服务同镜像模板 deploy/docker/mall-service.Dockerfile（上下文=仓库根）。
+  # 容器内互访走服务名 + 容器端口（mall-goods:9111 / mall-order:9112 / redis:6379），
+  # 与宿主映射端口无关；服务监听 ":端口"（全零地址）天然可被映射/互访。
+  mall-goods:
+    profiles: [mall]
+    build:
+      # 仓库根（根 go.mod 所在）——与 Dockerfile 注释的“上下文=仓库根”一致
+      context: ../..
+      dockerfile: deploy/docker/mall-service.Dockerfile
+      args: { SVC: mall-goods }
+    image: my-market/mall-goods:local
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MARKET_MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/market?charset=utf8mb4&parseTime=true&loc=Local
+      # gRPC 业务口 9111 / HTTP 健康口 9110（容器内探活，不发布宿主）
+    ports:
+      - "9111:9111" # gRPC（grpcurl 宿主调试用；9110 健康口不发布，注释说明）
+    depends_on:
+      # infra 属另一 profile：单独 --profile mall 时依赖自动跳过（OpenStore 起服即 ping，
+      # mysql 未就绪则容器 restart 重试；全家桶起法下等待健康）
+      mysql:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9110/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  mall-order:
+    profiles: [mall]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/mall-service.Dockerfile
+      args: { SVC: mall-order }
+    image: my-market/mall-order:local
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MARKET_MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/market?charset=utf8mb4&parseTime=true&loc=Local
+      # gRPC 业务口 9112 / HTTP 健康口 9120；进程内 worker（履约 outbox 10s 轮 +
+      # 超时关单 60s 轮）随容器起停，无独立容器
+    ports:
+      - "9112:9112" # gRPC（宿主调试用；9120 健康口不发布）
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9120/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  mall-bff:
+    profiles: [mall]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/mall-service.Dockerfile
+      args: { SVC: mall-bff }
+    image: my-market/mall-bff:local
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 回调验签 HMAC 密钥：/payments/callback 验签与 mock provider 签名共用，
+      # 未设置服务直接退出（main.go log.Fatal）——compose 用 :? 解析期即报错。
+      # 生成：openssl rand -hex 32（写入 deploy/compose/.env）
+      PAY_CALLBACK_SECRET: ${PAY_CALLBACK_SECRET:?PAY_CALLBACK_SECRET is required - see deploy/compose/.env.example}
+      # 容器内地址一律服务名；PAY_CALLBACK_URL 是 mock provider 自回打基址
+      # （bff → 自身），置服务名而非 127.0.0.1，与“容器部署置对外可达地址”口径一致
+      BFF_ADDR: ":18090"
+      PAY_CALLBACK_URL: http://mall-bff:18090
+      GOODS_ADDR: mall-goods:9111
+      ORDER_ADDR: mall-order:9112
+      GATEWAY_ADDR: http://gateway:18080
+      # 与 ai 组共用同一 Redis 实例（compose 无密码启动）；mall-bff 现行代码
+      # 只读 REDIS_ADDR 不读 REDIS_PASSWORD（本地未设密码，与 ai 侧同变量名预留，
+      # 若后续给 redis 设密码需先补 bff 的 go-redis Password 透传）
+      REDIS_ADDR: redis:6379
+      # per-tenant 限流走契约默认 120 req/min（api-contract §8），不沿用 ai 组
+      # 的 RATE_LIMIT_PER_MIN（那是 gateway 数据面阈值，语义不同）
+    ports:
+      - "18090:18090" # REST 唯一入口 /api/v1 + /healthz
+    depends_on:
+      mall-goods:
+        condition: service_healthy
+      mall-order:
+        condition: service_healthy
+      # ai 组的 gateway（会话链路 /auth/* 代理）跨 profile：required=false，
+      # 单独 --profile mall 起时跳过等待（gw 会话校验经 restart 轮询恢复）
+      gateway:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:18090/healthz"]
       interval: 10s
       timeout: 3s
       retries: 12
