@@ -20,7 +20,7 @@ sequenceDiagram
 
     A->>B: POST /orders（recharge，Idempotency-Key）
     alt 幂等键已存在
-        O-->>B: 同 payload→返回原单 200；异 payload→MALL_30003
+        O-->>B: 同 payload→返回原单 201（与首次同形）；异 payload→MALL_30003
     else 正常
         O->>M: 事务：INSERT mall_orders(created)+行快照
     end
