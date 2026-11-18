@@ -1,11 +1,14 @@
-// mall-order：履约 outbox worker（ADR-004）。
+// mall-order：履约 outbox worker（ADR-004 + R2-T3 credit 分支）。
 //
 // RunFulfillmentOnce 拉一批到期 pending 任务（status=1 且 next_run_at 到期）
-// → 逐行 ship 执行（默认进程内 mock，可经 Store.shipLine 注入替换）→ 标
+// → 逐行履约（task_type 分发：credit 行调 billing.Credit 真实入账，
+// ref_type="mall"/ref_id=order_no:line_no，其余行走 shipLine 接缝/mock）→ 标
 // done；订单推进 paid→fulfilled 两条路：本批触达订单的精准 promote +
 // 每 tick 一次的全量幂等扫描（自愈"标完 done 后、promote 前崩溃"窗口，
 // 含 failed 行的订单不推进——留给对账）。执行失败 → retry_count+1 指数
 // 退避（2^n 秒），retry_count 达 5 → failed 终态（对账介入）。
+// credit 行断电窗口由 billing uk_ref 幂等兜底：Credit 已提交、done 未标 →
+// 重放同 ref no-op → 收敛（恰入账一次，TestWorker_CreditCrashReplay_ExactlyOneTopup）。
 //
 // 进程内双循环（main.go 起两个 goroutine，退出信号经 ctx 取消优雅停止）：
 //   - RunFulfillmentLoop：履约轮询，间隔 10s；
@@ -17,6 +20,9 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
 // worker 节奏常量（brief：履约 10s / 超时扫描 60s / 订单超时 30 分钟）。
@@ -27,6 +33,19 @@ const (
 	fulfillmentBatch    = 100 // 单轮最大任务行数
 	fulfillmentMaxRetry = 5   // retry_count 上限，达限 → failed
 )
+
+// fulfillment_tasks.task_type 编码（db-schema 注释；与 mall_order_items.type
+// 同值语义——MarkPaidTx 按行 type 投递）。
+const (
+	taskTypeShip      = 1 // general 行：物流发货（R2 mock）
+	taskTypeCredit    = 2 // recharge 行：billing.Credit 入账（R2-T3 真实通道）
+	taskTypeSubscribe = 3 // subscription 行：订阅开通（R2.5 前不出现，mock 兜底）
+)
+
+// billingRPCTimeout billing 单次 RPC 预算（Credit 履约 / Refund 冲退同口径，
+// 与 bff 侧下游调用 5s 对齐）：worker 循环 ctx 长寿命，必须给单次外部调用
+// 设独立期限，防 billing 挂起拖死整轮履约。
+const billingRPCTimeout = 5 * time.Second
 
 // fulfillmentTaskRow fulfillment_tasks 表行（db-schema.sql，读取用）。
 type fulfillmentTaskRow struct {
@@ -44,7 +63,8 @@ type fulfillmentTaskRow struct {
 
 func (fulfillmentTaskRow) TableName() string { return "fulfillment_tasks" }
 
-// RunFulfillmentOnce 执行一轮履约：拉到期 pending → ship → done，
+// RunFulfillmentOnce 执行一轮履约：拉到期 pending → 逐行履约（credit 行走
+// billing.Credit 真实入账通道，其余走 shipLine 接缝/mock）→ 标 done，
 // 推进全行 done 的订单至 fulfilled。返回本轮完成的任务行数。
 func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 	var tasks []fulfillmentTaskRow
@@ -53,14 +73,10 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 		Order("id ASC").Limit(fulfillmentBatch).Find(&tasks).Error; err != nil {
 		return 0, fmt.Errorf("mall-order: pull fulfillment tasks: %w", err)
 	}
-	ship := s.shipLine
-	if ship == nil {
-		ship = shipLineMock
-	}
 	done := 0
 	touched := make(map[string]bool, len(tasks))
 	for _, t := range tasks {
-		shipErr := ship(ctx, t)
+		shipErr := s.fulfillLine(ctx, t)
 		if shipErr == nil {
 			// 条件更新幂等：并发 worker / 重放时 RowsAffected=0 不计 done。
 			res := s.db.WithContext(ctx).Exec(
@@ -142,9 +158,78 @@ func (s *Store) promoteAllFulfilled(ctx context.Context) (int64, error) {
 	return res.RowsAffected, nil
 }
 
-// shipLineMock mock 发货（恒成功）：Store.shipLine 的缺省实现。真实渠道接入
-// 后按 task_type 分发（1 ship 物流 / 2 credit billing 入账 / 3 subscribe 订阅
-// 开通），失败返回 error 走退避重试（上限 5 → failed）。
+// fulfillLine 单行履约分发（R2-T3）：task_type=credit 的行走 billing.Credit
+// 真实入账通道（不经 shipLine 接缝——入账幂等由 billing uk_ref 承担，接缝
+// 桩测经 Store.billing 注入）；其余行（ship/subscribe）走既有 shipLine 接缝
+// （nil = mock，故障演练/物流渠道注入语义不变）。
+func (s *Store) fulfillLine(ctx context.Context, t fulfillmentTaskRow) error {
+	if t.TaskType == taskTypeCredit {
+		return s.creditLine(ctx, t)
+	}
+	ship := s.shipLine
+	if ship == nil {
+		ship = shipLineMock
+	}
+	return ship(ctx, t)
+}
+
+// creditLine recharge 行履约：billing.Credit 入账（R2-T3）。
+//
+// 请求组装（裁定 1/2）：tenant 取自订单头（mall_orders.tenant_id，任务行只带
+// order_no/line_no）；金额 = 行快照 face_value_cent + bonus_cent（赠送随入账）；
+// ref_type="mall"、ref_id=order_no:line_no —— billing uk_ref(ref_type,ref_id)
+// 是"恰入账一次"的幂等提交点。成功（created=true）或重放 no-op（created=false，
+// billing 已入账）都算履约成功；失败返回错误走既有退避（第 5 败 failed 交对账）。
+// 崩溃窗口：Credit 已提交、done 未标 → 重放同 ref → no-op → 收敛（不重不漏，
+// TestWorker_CreditCrashReplay_ExactlyOneTopup）。
+func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) error {
+	if s.billing == nil {
+		return mallerr.E(mallerr.CodeUpstreamUnavailable, true,
+			"billing client 未接线（credit 行履约需要 %s/%s）", billingAddrEnv, billingTokenEnv)
+	}
+	// 行快照 + 租户：JOIN 订单头取 tenant_id，行表取 face/bonus 快照。
+	var line struct {
+		TenantID      uint64 `gorm:"column:tenant_id"`
+		LineType      int8   `gorm:"column:type"`
+		FaceValueCent int64  `gorm:"column:face_value_cent"`
+		BonusCent     int64  `gorm:"column:bonus_cent"`
+	}
+	err := s.db.WithContext(ctx).
+		Table("mall_order_items").
+		Select("mall_orders.tenant_id, mall_order_items.type, mall_order_items.face_value_cent, mall_order_items.bonus_cent").
+		Joins("JOIN mall_orders ON mall_orders.order_no = mall_order_items.order_no").
+		Where("mall_order_items.order_no = ? AND mall_order_items.line_no = ?", t.OrderNo, t.LineNo).
+		Scan(&line).Error
+	if err != nil {
+		return fmt.Errorf("mall-order: load credit line %s:%d: %w", t.OrderNo, t.LineNo, err)
+	}
+	if line.TenantID == 0 || line.LineType != typeCredit {
+		// 订单行缺失/类型不符：数据不一致，重试也不会好——退避后 failed 交对账。
+		return mallerr.E(mallerr.CodeInternal, false,
+			"credit 行数据不一致: %s:%d（tenant=%d type=%d）", t.OrderNo, t.LineNo, line.TenantID, line.LineType)
+	}
+	amount := line.FaceValueCent + line.BonusCent
+	if amount <= 0 {
+		return mallerr.E(mallerr.CodeInternal, false,
+			"credit 行金额非法: %s:%d（face=%d bonus=%d）", t.OrderNo, t.LineNo, line.FaceValueCent, line.BonusCent)
+	}
+	cctx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
+	defer cancel()
+	_, err = s.billing.Credit(cctx, &billingv1.CreditRequest{
+		TenantId:   int64(line.TenantID),
+		AmountCent: amount,
+		RefType:    "mall",
+		RefId:      fmt.Sprintf("%s:%d", t.OrderNo, t.LineNo),
+	})
+	if err != nil {
+		return fmt.Errorf("billing credit %s:%d: %w", t.OrderNo, t.LineNo, err)
+	}
+	return nil
+}
+
+// shipLineMock mock 发货（恒成功）：Store.shipLine 的缺省实现（general 行物流
+// 占位）。credit 行不走此路径（真实 billing 入账，见 fulfillLine）；订阅开通
+// R2.5 接入前由 mock 兜底（种子 301 on_sale=0，实际不会出现订阅行）。
 func shipLineMock(context.Context, fulfillmentTaskRow) error { return nil }
 
 // RunFulfillmentLoop 履约轮询循环（间隔 fulfillmentInterval），ctx 取消即退出。

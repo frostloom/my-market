@@ -191,8 +191,14 @@ type OrderPage struct {
 type Store struct {
 	db *gorm.DB
 	// shipLine 单行履约执行接缝（worker 注入点）：nil = 进程内 mock（恒成功）。
-	// 真实渠道接入后赋实现；测试注入桩/故障（见 worker_test.go）。
+	// 仅覆盖 ship/subscribe 行；credit 行走 billing 真实入账通道（见 fulfillLine）。
+	// 测试注入桩/故障（见 worker_test.go）。
 	shipLine func(ctx context.Context, t fulfillmentTaskRow) error
+	// billing billing 控制面客户端（R2-T3）：credit 行履约 Credit /
+	// fulfilled 冲退 Refund。nil = 未接线（credit 行履约/充值单冲退报错走
+	// 退避/退款失败，fail-closed 不静默 mock）。生产由 main.go 从 env 拨号注入，
+	// 测试注入桩（stubBilling）或真子进程 client。
+	billing BillingClient
 }
 
 // OpenStore 按 DSN 打开 MySQL 连接并 ping 通。

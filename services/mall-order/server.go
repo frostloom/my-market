@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
@@ -146,22 +147,58 @@ func (s *orderServer) CancelOrder(ctx context.Context, req *mallv1.CancelOrderRe
 	return toProtoOrder(ord), nil
 }
 
-// RefundOrder 退款（契约 §5；R1 仅 paid 分支：先作废 pending 履约行再退）。
-// RefundReply.refund_cent = 订单金额（R1 全额退）。
+// RefundOrder 退款（契约 §5 规则 D15，按订单状态分流）：
+//   - paid → RefundPaid（R1 既有：作废 pending 履约行 + 状态迁移）；
+//   - fulfilled → RefundFulfilled（R2-T3：recharge 行 billing.Refund 冲退
+//     min 口径、general 行直退+回补、subscription 行守卫拒绝）；
+//   - refunded → 幂等 no-op；created/closed → MALL_30002。
+//
+// RefundReply.refund_cent 口径：fulfilled 冲退 = 本次实退额（billing
+// refunded_cent 累加，min 钳制如实透传）；paid 直退 / 已 refunded 幂等回放 =
+// 订单金额（R1 口径：mall 侧无实退额落点，见 refund.go 崩溃窗口分析）。
 func (s *orderServer) RefundOrder(ctx context.Context, req *mallv1.RefundOrderReq) (*mallv1.RefundReply, error) {
 	var tenantID uint64
 	var orderNo string
 	if req != nil {
 		tenantID, orderNo = req.GetTenantId(), req.GetOrderNo()
 	}
-	if err := s.store.RefundPaid(ctx, tenantID, orderNo); err != nil {
-		return nil, toGRPCError(err)
-	}
 	ord, err := s.store.GetOrder(ctx, tenantID, orderNo)
 	if err != nil {
 		return nil, toGRPCError(err)
 	}
-	return &mallv1.RefundReply{Status: ord.Status, RefundCent: ord.AmountCent}, nil
+	// actualRefund < 0 = 未走实退额路径（paid 直退/幂等回放按订单金额应答）。
+	actualRefund := int64(-1)
+	switch ord.Status {
+	case "paid":
+		// RefundPaid 自身幂等（已 refunded → nil），状态竞态锁下复查。
+		if err := s.store.RefundPaid(ctx, tenantID, orderNo); err != nil {
+			return nil, toGRPCError(err)
+		}
+	case "fulfilled":
+		// 预读 fulfilled、并发退款已翻 refunded → 幂等哨兵（按已退应答）。
+		c, err := s.store.RefundFulfilled(ctx, tenantID, orderNo)
+		if err != nil {
+			if !errors.Is(err, errOrderAlreadyRefunded) {
+				return nil, toGRPCError(err)
+			}
+		} else {
+			actualRefund = c
+		}
+	case "refunded":
+		// 幂等：已退款，直接应答当前状态。
+	default:
+		return nil, toGRPCError(mallerr.E(mallerr.CodeOrderStateInvalid, false,
+			"订单状态不允许退款: %s（当前 %s）", orderNo, ord.Status))
+	}
+	ord, err = s.store.GetOrder(ctx, tenantID, orderNo)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	refundCent := ord.AmountCent
+	if actualRefund >= 0 {
+		refundCent = actualRefund
+	}
+	return &mallv1.RefundReply{Status: ord.Status, RefundCent: refundCent}, nil
 }
 
 // GetCart 购物车视图（契约 GET /cart）。

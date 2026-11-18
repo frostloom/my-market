@@ -7,9 +7,10 @@
 // CONTROL_PLANE_TOKEN 同值共享）。ai-gateway 的 internal/pkg/controlplane 不可跨
 // 服务 import，键名以本文件常量落契约（T4 compose 注入同名 env 双侧对齐）。
 //
-// 本任务只交付接口 + 实现 + 拨号；Credit/Refund 的调用点在 T3（worker 信用卡
-// 履约 / fulfilled 冲退）。接口方法签名与 billingv1.BillingServiceClient 一致，
-// T3 测试注入函数桩即可（同 mall-bff gclient.go 的接口化取向）。
+// 调用点（R2-T3 已接线）：worker credit 行履约 Credit（worker.go creditLine）/
+// fulfilled 充值单冲退 Refund（refund.go）。接口方法签名与
+// billingv1.BillingServiceClient 一致，测试注入函数桩（stubBilling）或真子进程
+// client（recordingBilling 包装）即可。
 package main
 
 import (

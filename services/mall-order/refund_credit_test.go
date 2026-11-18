@@ -1,0 +1,229 @@
+// mall-order fulfilled 退款测试（R2-T3）：fulfilled 订单逐行退款——
+// recharge（credit）行经 billing.Refund 冲退（ref="mall-refund:{order_no}:{line_no}"，
+// 与入账 ref 独立；实际退额 = min(请求额, 当前余额)，以 refunded_cent 记实退额），
+// general 行直退 + 回补库存（既有口径），subscription 行守卫拒绝（R2.5 前不出现）。
+//
+// TestRefund_FulfilledRecharge_MinRule 连真 billing（spawn ai-gateway cmd/billing
+// 子进程，见 worker_credit_test.go 的 harness）三态：
+//  1. 余额充足 → 全退（refunded = face+bonus）；
+//  2. 余额不足 → 部分退（refunded = min < 请求额）；
+//  3. 同 refund ref 重放（崩溃窗口重试）→ billing no-op 不重复退，订单收敛 refunded。
+//
+// 冲退发生在终局事务之外（崩溃窗口分析见 refund.go 文件头），billing 侧 uk_ref
+// 幂等保证重试收敛、绝不双重退款。禁止并发跑基础设施套件（T1 警示）。
+package main
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
+	"github.com/frostloom/my-market/pkg/mallerr"
+)
+
+func TestRefund_FulfilledRecharge_MinRule(t *testing.T) {
+	t.Run("sufficient_full_refund", func(t *testing.T) {
+		s := openOrderTestStore(t)
+		ctx := context.Background()
+		env := startRealBilling(t)
+		env.seedTenant(t, 0)
+		tenantID := env.tenant
+		cleanupTenant(t, s, tenantID)
+
+		ord := fulfillRechargeOrder(t, s, ctx, env, "ref-min-a")
+		wantAmount := ord.Items[0].FaceValueCent + ord.Items[0].BonusCent
+		wantRef := refundRefOf(ord.OrderNo, ord.Items[0].LineNo)
+
+		// 余额充足（刚入账未消费）→ 按请求额全退，refund_cent = 实退额。
+		refunded, err := s.RefundFulfilled(ctx, tenantID, ord.OrderNo)
+		if err != nil {
+			t.Fatalf("RefundFulfilled: %v", err)
+		}
+		if refunded != wantAmount {
+			t.Fatalf("refunded = %d，want %d（余额充足全退）", refunded, wantAmount)
+		}
+		assertFulfilledRefunded(t, s, ctx, env, tenantID, ord.OrderNo, wantRef, -wantAmount, wantAmount)
+		if ledger, column, redisV := env.balances(t); ledger != 0 || column != 0 || redisV != 0 {
+			t.Fatalf("退款后余额 = (ledger=%d, column=%d, redis=%d)，want 全 0", ledger, column, redisV)
+		}
+	})
+
+	t.Run("insufficient_partial_refund", func(t *testing.T) {
+		s := openOrderTestStore(t)
+		ctx := context.Background()
+		env := startRealBilling(t)
+		env.seedTenant(t, 0)
+		tenantID := env.tenant
+		cleanupTenant(t, s, tenantID)
+
+		ord := fulfillRechargeOrder(t, s, ctx, env, "ref-min-b")
+		wantAmount := ord.Items[0].FaceValueCent + ord.Items[0].BonusCent
+
+		// 预消费：真 billing Refund RPC 把余额压到请求额以下（模拟已花掉一部分）。
+		spend := int64(2000)
+		spendRef := "r2t3-spend-" + env.runID
+		spendRep, err := env.client.Refund(ctx, refundReq(tenantID, spend, spendRef))
+		if err != nil {
+			t.Fatalf("预消费 Refund: %v", err)
+		}
+		if spendRep.GetRefundedCent() != spend {
+			t.Fatalf("预消费实退 = %d，want %d", spendRep.GetRefundedCent(), spend)
+		}
+		if ledger, _, _ := env.balances(t); ledger != wantAmount-spend {
+			t.Fatalf("预消费后余额 = %d，want %d", ledger, wantAmount-spend)
+		}
+
+		// 余额不足 → billing min 钳制：实退 = 余额（< 请求额），以 refunded_cent 记实退额。
+		refunded, err := s.RefundFulfilled(ctx, tenantID, ord.OrderNo)
+		if err != nil {
+			t.Fatalf("RefundFulfilled: %v", err)
+		}
+		if refunded != wantAmount-spend {
+			t.Fatalf("refunded = %d，want %d（min(请求 %d, 余额 %d)）",
+				refunded, wantAmount-spend, wantAmount, wantAmount-spend)
+		}
+		assertFulfilledRefunded(t, s, ctx, env, tenantID, ord.OrderNo,
+			refundRefOf(ord.OrderNo, ord.Items[0].LineNo), -(wantAmount - spend), wantAmount)
+		if ledger, column, redisV := env.balances(t); ledger != 0 || column != 0 || redisV != 0 {
+			t.Fatalf("退款后余额 = (ledger=%d, column=%d, redis=%d)，want 全 0", ledger, column, redisV)
+		}
+	})
+
+	t.Run("replay_idempotent_no_double_refund", func(t *testing.T) {
+		s := openOrderTestStore(t)
+		ctx := context.Background()
+		env := startRealBilling(t)
+		env.seedTenant(t, 0)
+		tenantID := env.tenant
+		cleanupTenant(t, s, tenantID)
+
+		ord := fulfillRechargeOrder(t, s, ctx, env, "ref-min-c")
+		wantAmount := ord.Items[0].FaceValueCent + ord.Items[0].BonusCent
+		wantRef := refundRefOf(ord.OrderNo, ord.Items[0].LineNo)
+
+		// 首次退款成功。
+		refunded, err := s.RefundFulfilled(ctx, tenantID, ord.OrderNo)
+		if err != nil {
+			t.Fatalf("RefundFulfilled#1: %v", err)
+		}
+		if refunded != wantAmount {
+			t.Fatalf("首次 refunded = %d，want %d", refunded, wantAmount)
+		}
+
+		// 崩溃窗口重放：billing 已冲退、mall 状态翻转丢失 → 订单被打回 fulfilled，
+		// 再次 RefundFulfilled → 同 refund ref 重放 billing no-op（refunded_cent=0）、
+		// 不重复退款，订单收敛 refunded。
+		if err := s.db.Exec(
+			"UPDATE mall_orders SET status = ? WHERE order_no = ? AND tenant_id = ?",
+			orderStatusFulfilled, ord.OrderNo, tenantID).Error; err != nil {
+			t.Fatalf("打回 fulfilled: %v", err)
+		}
+		refunded, err = s.RefundFulfilled(ctx, tenantID, ord.OrderNo)
+		if err != nil {
+			t.Fatalf("RefundFulfilled#2（重放）: %v", err)
+		}
+		if refunded != 0 {
+			t.Fatalf("重放 refunded = %d，want 0（同 ref no-op 不重复退）", refunded)
+		}
+		if n := env.topupCount(t, "refund", wantRef); n != 1 {
+			t.Fatalf("重放后冲退流水 = %d 条，want 恰 1（uk_ref 幂等）", n)
+		}
+		if st, _ := orderStatusOf(t, s, ctx, tenantID, ord.OrderNo); st != "refunded" {
+			t.Fatalf("重放后订单 status = %s，want refunded（收敛）", st)
+		}
+		if ledger, column, redisV := env.balances(t); ledger != 0 || column != 0 || redisV != 0 {
+			t.Fatalf("重放后余额 = (ledger=%d, column=%d, redis=%d)，want 全 0（只退一次）",
+				ledger, column, redisV)
+		}
+	})
+
+	t.Run("fulfilled_recharge_state_guards", func(t *testing.T) {
+		s := openOrderTestStore(t)
+		ctx := context.Background()
+		cleanupTenant(t, s, testTenantA)
+
+		// created 订单走 fulfilled 退款分支 → MALL_30002（状态机守卫，不触 billing）。
+		ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "ref-guard-1")
+		if err != nil {
+			t.Fatalf("CreateRechargeOrder: %v", err)
+		}
+		_, err = s.RefundFulfilled(ctx, testTenantA, ord.OrderNo)
+		assertMallCode(t, err, mallerr.CodeOrderStateInvalid)
+		if st, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); st != "created" {
+			t.Fatalf("created 订单被退款污染：status = %s，want created", st)
+		}
+
+		// 不存在的订单 → MALL_30001。
+		_, err = s.RefundFulfilled(ctx, testTenantA, "M20261119000000NOPE1")
+		assertMallCode(t, err, mallerr.CodeOrderNotFound)
+
+		// 跨租户 → MALL_30001（与 GetOrder 同口径，不泄漏存在性）。
+		_, err = s.RefundFulfilled(ctx, testTenantB, ord.OrderNo)
+		assertMallCode(t, err, mallerr.CodeOrderNotFound)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// 辅助
+
+// refundRefOf fulfilled 冲退幂等锚点（ADR-005：与入账 ref 独立）。
+func refundRefOf(orderNo string, lineNo int32) string {
+	return fmt.Sprintf("mall-refund:%s:%d", orderNo, lineNo)
+}
+
+// refundReq 组 billing Refund 请求（测试用）。
+func refundReq(tenantID uint64, amountCent int64, ref string) *billingv1.RefundRequest {
+	return &billingv1.RefundRequest{TenantId: int64(tenantID), AmountCent: amountCent, Ref: ref}
+}
+
+// fulfillRechargeOrder 造"已履约"充值单：直购 202 → 支付 → worker 经真 billing
+// 入账一轮 → fulfilled，余额 = face+bonus。返回订单聚合。
+func fulfillRechargeOrder(t *testing.T, s *Store, ctx context.Context, env *billingTestEnv, idem string) *Order {
+	t.Helper()
+	ord, err := s.CreateRechargeOrder(ctx, env.tenant, 202, idem+"-"+env.runID)
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder: %v", err)
+	}
+	if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+		TradeNo: "T-" + idem, Paid: true, AmountCent: ord.AmountCent}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	s.billing = env.client
+	done, err := s.RunFulfillmentOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunFulfillmentOnce: %v", err)
+	}
+	if done != 1 {
+		t.Fatalf("履约 done = %d，want 1", done)
+	}
+	if st, _ := orderStatusOf(t, s, ctx, env.tenant, ord.OrderNo); st != "fulfilled" {
+		t.Fatalf("订单 status = %s，want fulfilled（履约前置态）", st)
+	}
+	want := ord.Items[0].FaceValueCent + ord.Items[0].BonusCent
+	if ledger, _, _ := env.balances(t); ledger != want {
+		t.Fatalf("履约后余额 = %d，want %d", ledger, want)
+	}
+	return ord
+}
+
+// assertFulfilledRefunded 断言 fulfilled 退款落账：订单 refunded、paid 流水置
+// refunded、billing 冲退流水恰 1 条（负额 + requested 记请求额）。
+func assertFulfilledRefunded(t *testing.T, s *Store, ctx context.Context, env *billingTestEnv, tenantID uint64,
+	orderNo, wantRef string, wantAmount, wantRequested int64) {
+	t.Helper()
+	if st, _ := orderStatusOf(t, s, ctx, tenantID, orderNo); st != "refunded" {
+		t.Fatalf("订单 status = %s，want refunded", st)
+	}
+	recStatus, _ := paymentRecord(t, s, orderNo)
+	if recStatus != paymentStatusRefunded {
+		t.Fatalf("支付流水 status = %d，want refunded=4", recStatus)
+	}
+	if n := env.topupCount(t, "refund", wantRef); n != 1 {
+		t.Fatalf("冲退流水(%s) = %d 条，want 恰 1", wantRef, n)
+	}
+	amount, requested := env.topupAmount(t, "refund", wantRef)
+	if amount != wantAmount || requested != wantRequested {
+		t.Fatalf("冲退流水 = (amount=%d, requested=%d)，want (%d, %d)", amount, requested, wantAmount, wantRequested)
+	}
+}

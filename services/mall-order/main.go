@@ -2,7 +2,10 @@
 // ORDER_GRPC_ADDR（默认 :9112）；小 HTTP 监听 ORDER_HTTP_ADDR（默认 :9120）
 // 只挂 /healthz（compose 健康检查用）。DSN 必须经 MARKET_MYSQL_DSN 注入
 // （凭据不硬编码、不落代码仓）。支付域 worker（履约 10s / 超时扫描 60s）
-// 为进程内 goroutine，随退出信号优雅停止。
+// 为进程内 goroutine，随退出信号优雅停止。billing 控制面客户端（credit 行
+// 履约 / 充值单冲退）从 BILLING_ADDR/CONTROL_PLANE_TOKEN 拨号注入（T4
+// compose 注入；本地起服先 export 同名 env——值取 deploy/compose/.env），
+// 缺 token 起服即失败（fail-closed，与 billing 侧空令牌全拒对齐）。
 package main
 
 import (
@@ -40,6 +43,15 @@ func main() {
 		log.Fatalf("打开 market 库失败: %v", err)
 	}
 	defer store.Close() //nolint:errcheck // 退出路径，连接池释放失败不影响结果
+
+	// billing 控制面客户端（R2-T3）：credit 行履约 Credit / fulfilled 冲退 Refund。
+	// 空令牌/坏地址在起服时即暴露（fail-closed：不把无鉴权客户端装成可用）。
+	billingClient, closeBilling, err := dialBillingFromEnv()
+	if err != nil {
+		log.Fatalf("billing client 拨号失败: %v", err)
+	}
+	defer closeBilling() //nolint:errcheck // 退出路径，连接释放失败不影响结果
+	store.billing = billingClient
 
 	// gRPC：下单域服务 + 标准 grpc_health_v1（探活语义，compose 用 HTTP 探活，
 	// gRPC 健康检查供服务网格/运维工具使用）。
