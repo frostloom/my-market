@@ -93,8 +93,8 @@ AI 售卖沿用 gateway 现状，**只有两种模式**：
 | Web 控制台 | Vue3 双入口；gateway 同时托管数据面与页面 | 保留，与商城前端并存 |
 | 评测资产 | eval/ 220M（含 langfuse-workbench） | **随仓迁移**，评测在新仓继续 |
 
-**服务与端口（dev，已核实）**：gateway **代码默认 8080，dev 由 `GATEWAY_PORT=18080` 显式设定（迁移后 compose 必须带）** · billing 9101(gRPC)/9103(admin HTTP，**全端口要求 X-Control-Token**，含 /auth/*) · router 9102 · agent 9105 · mock-provider 9201-9203 · MySQL 3307 · Redis 6381 · Kafka **容器内 9092 / 宿主映射 29092**（宿主进程接入用 29092）。
-**新增分配**：mall-bff 18090 · mall-goods 9111 · mall-order 9112 · seckill 9113 · registry 5000（K8s 期）。
+**服务与端口（dev，已核实）**：gateway **代码默认 8080，dev 由 `GATEWAY_PORT=18080` 显式设定（迁移后 compose 必须带）** · billing 9101(gRPC)/9103(admin HTTP，**全端口要求 X-Control-Token**，含 /auth/*) · router 9102 · agent 9105 · mock-provider **9201（dev 单实例；多实例部署可扩至 9202/9203）** · MySQL 3307 · Redis 6381 · Kafka **容器内 9092 / 宿主映射 29092**（宿主进程接入用 29092）。
+**新增分配**：mall-bff 18090 · mall-goods 9111（gRPC）+ 9110（HTTP /healthz 辅助口）· mall-order 9112（gRPC）+ 9120（HTTP /healthz）· seckill 9113（R4）· registry 5000（K8s 期）。
 
 ---
 
