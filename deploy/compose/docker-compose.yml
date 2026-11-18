@@ -320,6 +320,11 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       MARKET_MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/market?charset=utf8mb4&parseTime=true&loc=Local
+      # R2：credit 行履约/退款冲退走 billing gRPC（容器内服务名 + 容器端口；
+      # 宿主映射口 9101 与容器内 9101 同值）。CONTROL_PLANE_TOKEN 与 ai 组
+      # 同源共享（billing 全方法 X-Control-Token 门禁），未设置解析期即报错。
+      BILLING_ADDR: billing:9101
+      CONTROL_PLANE_TOKEN: ${CONTROL_PLANE_TOKEN:?CONTROL_PLANE_TOKEN is required - see deploy/compose/.env.example}
       # gRPC 业务口 9112 / HTTP 健康口 9120；进程内 worker（履约 outbox 10s 轮 +
       # 超时关单 60s 轮）随容器起停，无独立容器
     ports:
@@ -359,6 +364,11 @@ services:
       # 只读 REDIS_ADDR 不读 REDIS_PASSWORD（本地未设密码，与 ai 侧同变量名预留，
       # 若后续给 redis 设密码需先补 bff 的 go-redis Password 透传）
       REDIS_ADDR: redis:6379
+      # R2：/me/overview 余额/流水走 billing 两侧（gRPC 9101 + admin HTTP 9103，
+      # 均带 X-Control-Token；token 与 ai 组同源共享，未设置解析期即报错）
+      BILLING_ADDR: billing:9101
+      BILLING_ADMIN_ADDR: http://billing:9103
+      CONTROL_PLANE_TOKEN: ${CONTROL_PLANE_TOKEN:?CONTROL_PLANE_TOKEN is required - see deploy/compose/.env.example}
       # per-tenant 限流走契约默认 120 req/min（api-contract §8），不沿用 ai 组
       # 的 RATE_LIMIT_PER_MIN（那是 gateway 数据面阈值，语义不同）
     ports:
