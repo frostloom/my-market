@@ -23,8 +23,8 @@ func mustFromGRPC(t *testing.T, err error) (codes.Code, Code, bool) {
 	return st.Code(), code, retryable
 }
 
-// 1) 同 HTTP 语义码可区分：MALL_20001（商品不存在）与 MALL_20006（品类不存在）
-//    都是 404 → gRPC 同为 NotFound，但 Reason 载体不同。
+//  1. 同 HTTP 语义码可区分：MALL_20001（商品不存在）与 MALL_20006（品类不存在）
+//     都是 404 → gRPC 同为 NotFound，但 Reason 载体不同。
 func TestToGRPC_SameHTTPCodeDistinguishable(t *testing.T) {
 	goodsErr := ToGRPC(E(CodeGoodsNotFound, false, "商品不存在: 999"))
 	catErr := ToGRPC(E(CodeCategoryNotFound, false, "品类不存在: 7"))
@@ -76,8 +76,8 @@ func TestToGRPC_SystemCodesNotCollapsed(t *testing.T) {
 	}
 }
 
-// 3) 无载体优雅回落 + 往返：非 mallerr 错误 ToGRPC = 现状行为（Internal+原文）；
-//    无 ErrorInfo 的 status 错误、非 gRPC 错误、nil 的 FromGRPC = ok=false。
+//  3. 无载体优雅回落 + 往返：非 mallerr 错误 ToGRPC = 现状行为（Internal+原文）；
+//     无 ErrorInfo 的 status 错误、非 gRPC 错误、nil 的 FromGRPC = ok=false。
 func TestFromGRPC_FallbackWithoutCarrier(t *testing.T) {
 	// 非 mallerr 错误 → Internal（现状行为），FromGRPC ok=false
 	plain := errors.New("boom")

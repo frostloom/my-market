@@ -1,6 +1,7 @@
 // mall-order：支付域（Provider 抽象 + 回调落账事务）。
 //
 // Callback 落账事务语义（MarkPaidTx，ADR-004/ADR-007 同库事务口径）：
+//
 //	BEGIN → 锁订单行 → 幂等判定（同 order_no+provider+provider_trade_no 已
 //	paid → no-op，金额不一致也以首回调为准）→ 写 payment_records
 //	（新 trade_no 插入；旧 failed 升级 paid）→ cb.Paid 且订单 created 时

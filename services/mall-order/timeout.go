@@ -1,14 +1,15 @@
 // mall-order：订单终态分支——超时关单 / 用户取消 / 退款（paid 分支）。
 //
 // 状态机口径（db-schema mall_orders.status 注释）：
+//
 //	created(1) --支付--> paid(2) --全行履约 done--> fulfilled(3)
 //	created(1) --超时/用户取消--> closed(5, reason=timeout/user) + 回补库存
 //	paid(2)    --退款--> refunded(4)：作废 pending 履约行（voided）+ 流水置 refunded
 //
 // 所有迁移都是条件更新（WHERE status=旧态）实现幂等：
-//	- 已 closed 的重复取消/扫描 → no-op（契约：重复操作返回当前状态 200）；
-//	- 已 refunded 的重复退款 → no-op；
-//	- 状态机非法迁移（paid 再取消、created 直接退款）→ MALL_30002。
+//   - 已 closed 的重复取消/扫描 → no-op（契约：重复操作返回当前状态 200）；
+//   - 已 refunded 的重复退款 → no-op；
+//   - 状态机非法迁移（paid 再取消、created 直接退款）→ MALL_30002。
 package main
 
 import (
