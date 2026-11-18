@@ -1,6 +1,6 @@
 # mall-bff API 契约（spec/api-contract.md）
 
-> 依据 [PRD.md](../PRD.md) v0.4（D14/D15/D17）。mall-bff 的对外 REST 契约（鸿蒙 App 已取消，调用方为脚本/任意客户端）；变更先改本文档。
+> 依据 [PRD.md](../PRD.md) v0.5（D14/D15/D17/D18）。mall-bff 的对外 REST 契约；调用方为**商城 Web 双前端**（用户端 + 管理端，R6）；变更先改本文档。
 > 基地址：`http://<host>:18090/api/v1`
 
 ---
@@ -181,3 +181,7 @@ Provider 异步回调入口（mock/stripe test 均打到此处）。成功 200 `
 | mall-bff 基础 | per-tenant 全接口 | Redis 计数器 120 req/min | MALL_10006 |
 | 秒杀入口 | 抢购端点 | 令牌桶（R4 压测定容） | MALL_40004 |
 | gateway 数据面 | /v1 推理 | billing 既有 Redis Lua（不动） | gateway 既有行为 |
+
+## 9. 管理端 API（占位——R6 前随 spec 增补冻结）
+
+管理端控制台（mall-admin）消费 `/api/v1/admin/*`：商品管理（增改/上下架/库存/定价）、订单管理（查询/退款处置）、秒杀活动管理（创建/预热/启停）、销售统计。鉴权方案（X-Admin-Token vs gateway 管理会话代理）与全量契约在 R6 启动前以本文档增补形式冻结（PRD D18）。

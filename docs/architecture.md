@@ -1,7 +1,7 @@
 # my-market 架构与服务流转图
 
-> 配套 [PRD.md](PRD.md) v0.4 使用。图为规格与实现的统一依据，变更先改图再改码。
-> **2026-11-18 范围调整：鸿蒙作业取消，无专属客户端**——图中的 App 泛指 mall-bff 的 API 调用方（curl/脚本/未来 Web）。
+> 配套 [PRD.md](PRD.md) v0.5 使用。图为规格与实现的统一依据，变更先改图再改码。
+> **2026-11-18 范围调整：鸿蒙作业取消，客户端改为 Web 双前端（用户端商城 + 管理端控制台，R6，见 PRD §5.4/D18）**——图中 App/调用方节点即前端；admin 契约 R6 前 spec 增补冻结。
 > 以下 Mermaid 图可在 GitHub / VS Code / Typora 直接渲染。
 
 ---
@@ -11,7 +11,8 @@
 ```mermaid
 flowchart TB
     subgraph Clients["客户端层"]
-        APP["商城 API 调用方<br/>curl/脚本/未来 Web"]
+        APP["商城 Web 前端<br/>用户端 mall-user · R6"]
+        ADMIN["管理端控制台<br/>mall-admin · R6"]
         WEB["Web 控制台<br/>portal / dashboard<br/>充值入口现关闭"]
         EXT["外部程序<br/>OpenAI 兼容调用"]
     end
@@ -49,7 +50,8 @@ flowchart TB
 
     PROV["上游 LLM<br/>mock-provider ×3 / 真实模型"]
 
-    APP -->|"REST + Bearer 会话"| BFF
+    APP -->|"REST + Bearer 会话<br/>（mall-bff go:embed 托管前端）"| BFF
+    ADMIN -->|"REST + admin 凭证<br/>/api/v1/admin/*（R6 契约增补）"| BFF
     WEB --> GW
     EXT -->|"Bearer API key"| GW
 
@@ -257,7 +259,7 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as API 调用方
+    participant A as 商城前端
     participant B as mall-bff :18090
     participant G as gateway :18080
     participant L as billing :9103
