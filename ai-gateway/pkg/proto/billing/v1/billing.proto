@@ -12,7 +12,7 @@ package billing.v1;
 
 option go_package = "github.com/frostloom/ai-gateway/pkg/proto/billing/v1;billingv1";
 
-// BillingService 计费控制面。除 GetBalance 外全部幂等（按 request_id）。
+// BillingService 计费控制面。除 GetBalance/ValidateAPIKey/RebuildBalance 外全部幂等。
 service BillingService {
   // 预占额度：原子「判余额 ≥ 预扣额 再扣减」，修复 new-api 的 check-then-act 超卖缺陷。
   // 同一 request_id 重复调用不重复扣（Redis guard + bills 唯一索引双保险）。
@@ -30,6 +30,13 @@ service BillingService {
   // 从账本重建余额投影（M4 对账兜底）：以 MySQL bills 为权威重算 Redis balance，
   // 收敛「预扣已扣但落库失败/结算丢失」等任何脏投影。
   rpc RebuildBalance(RebuildBalanceRequest) returns (RebuildBalanceResponse);
+  // 入账（R2 商城充值闭环，加法改造）：复用 topups 同步事务路径——
+  // topup 行 + tenants.ledger_balance 同事务，uk_ref(ref_type,ref_id) 为幂等提交点。
+  // 同 ref 重放 no-op：返回当前余额与 created=false。
+  rpc Credit(CreditRequest) returns (CreditReply);
+  // 退款（R2 商城冲退，加法改造）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
+  // ref 为幂等锚点（topups ref_type="refund", ref_id=ref）。同 ref 重放 no-op：refunded_cent=0。
+  rpc Refund(RefundRequest) returns (RefundReply);
 }
 
 message ReserveRequest {
@@ -113,4 +120,26 @@ message RebuildBalanceRequest {
 
 message RebuildBalanceResponse {
   int64 balance = 1;   // 重建后的余额（投影）
+}
+
+message CreditRequest {
+  int64 tenant_id = 1;
+  int64 amount_cent = 2;  // 必须 > 0
+  string ref_type = 3;    // 幂等键前半（如 "mall"）；1-16 字符（兼作 topups.source）
+  string ref_id = 4;      // 幂等键后半（如 order_no:line_no）；1-64 字符
+}
+
+message CreditReply {
+  int64 balance_cent = 1; // 入账后余额（账本口径，已同步 Redis 投影）
+  bool created = 2;       // false = 同 ref 已入账过（no-op）
+}
+
+message RefundRequest {
+  int64 tenant_id = 1;
+  int64 amount_cent = 2;  // 必须 > 0；实际退额 = min(此值, 当前余额)
+  string ref = 3;         // 幂等锚点（topups ref_id，ref_type 固定 "refund"）；1-64 字符
+}
+
+message RefundReply {
+  int64 refunded_cent = 1; // 实际退额；同 ref 重放为 0（no-op）
 }

@@ -138,6 +138,40 @@ func (s *Service) RebuildBalance(ctx context.Context, req *billingv1.RebuildBala
 	return &billingv1.RebuildBalanceResponse{Balance: bal}, nil
 }
 
+// Credit 入账（R2 商城充值闭环，幂等）：store 复用 topups 同步事务路径，
+// uk_ref(ref_type, ref_id) 幂等；校验失败（非正金额/ref 非法）由 store 返回 InvalidArgument。
+func (s *Service) Credit(ctx context.Context, req *billingv1.CreditRequest) (*billingv1.CreditReply, error) {
+	bal, created, err := s.store.Credit(ctx, uint64(req.TenantId), req.AmountCent, req.RefType, req.RefId)
+	if err != nil {
+		return nil, err
+	}
+	s.log.Info("credit",
+		"tenant_id", req.TenantId,
+		"amount_cent", req.AmountCent,
+		"ref_type", req.RefType,
+		"ref_id", req.RefId,
+		"created", created,
+		"balance_cent", bal,
+	)
+	return &billingv1.CreditReply{BalanceCent: bal, Created: created}, nil
+}
+
+// Refund 按额退款（R2 商城冲退，幂等）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
+// ref 为幂等锚点，同 ref 重放 refunded_cent=0（no-op）。
+func (s *Service) Refund(ctx context.Context, req *billingv1.RefundRequest) (*billingv1.RefundReply, error) {
+	refunded, err := s.store.RefundCent(ctx, uint64(req.TenantId), req.AmountCent, req.Ref)
+	if err != nil {
+		return nil, err
+	}
+	s.log.Info("refund",
+		"tenant_id", req.TenantId,
+		"amount_cent", req.AmountCent,
+		"ref", req.Ref,
+		"refunded_cent", refunded,
+	)
+	return &billingv1.RefundReply{RefundedCent: refunded}, nil
+}
+
 func settleUsageContext(ctx context.Context) (context.Context, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	prompt := md.Get(controlplane.SettlePromptKey)

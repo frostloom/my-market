@@ -35,13 +35,15 @@ const (
 	BillingService_GetBalance_FullMethodName     = "/billing.v1.BillingService/GetBalance"
 	BillingService_ValidateAPIKey_FullMethodName = "/billing.v1.BillingService/ValidateAPIKey"
 	BillingService_RebuildBalance_FullMethodName = "/billing.v1.BillingService/RebuildBalance"
+	BillingService_Credit_FullMethodName         = "/billing.v1.BillingService/Credit"
+	BillingService_Refund_FullMethodName         = "/billing.v1.BillingService/Refund"
 )
 
 // BillingServiceClient is the client API for BillingService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// BillingService 计费控制面。除 GetBalance 外全部幂等（按 request_id）。
+// BillingService 计费控制面。除 GetBalance/ValidateAPIKey/RebuildBalance 外全部幂等。
 type BillingServiceClient interface {
 	// 预占额度：原子「判余额 ≥ 预扣额 再扣减」，修复 new-api 的 check-then-act 超卖缺陷。
 	// 同一 request_id 重复调用不重复扣（Redis guard + bills 唯一索引双保险）。
@@ -59,6 +61,13 @@ type BillingServiceClient interface {
 	// 从账本重建余额投影（M4 对账兜底）：以 MySQL bills 为权威重算 Redis balance，
 	// 收敛「预扣已扣但落库失败/结算丢失」等任何脏投影。
 	RebuildBalance(ctx context.Context, in *RebuildBalanceRequest, opts ...grpc.CallOption) (*RebuildBalanceResponse, error)
+	// 入账（R2 商城充值闭环，加法改造）：复用 topups 同步事务路径——
+	// topup 行 + tenants.ledger_balance 同事务，uk_ref(ref_type,ref_id) 为幂等提交点。
+	// 同 ref 重放 no-op：返回当前余额与 created=false。
+	Credit(ctx context.Context, in *CreditRequest, opts ...grpc.CallOption) (*CreditReply, error)
+	// 退款（R2 商城冲退，加法改造）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
+	// ref 为幂等锚点（topups ref_type="refund", ref_id=ref）。同 ref 重放 no-op：refunded_cent=0。
+	Refund(ctx context.Context, in *RefundRequest, opts ...grpc.CallOption) (*RefundReply, error)
 }
 
 type billingServiceClient struct {
@@ -139,11 +148,31 @@ func (c *billingServiceClient) RebuildBalance(ctx context.Context, in *RebuildBa
 	return out, nil
 }
 
+func (c *billingServiceClient) Credit(ctx context.Context, in *CreditRequest, opts ...grpc.CallOption) (*CreditReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreditReply)
+	err := c.cc.Invoke(ctx, BillingService_Credit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) Refund(ctx context.Context, in *RefundRequest, opts ...grpc.CallOption) (*RefundReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefundReply)
+	err := c.cc.Invoke(ctx, BillingService_Refund_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BillingServiceServer is the server API for BillingService service.
 // All implementations must embed UnimplementedBillingServiceServer
 // for forward compatibility.
 //
-// BillingService 计费控制面。除 GetBalance 外全部幂等（按 request_id）。
+// BillingService 计费控制面。除 GetBalance/ValidateAPIKey/RebuildBalance 外全部幂等。
 type BillingServiceServer interface {
 	// 预占额度：原子「判余额 ≥ 预扣额 再扣减」，修复 new-api 的 check-then-act 超卖缺陷。
 	// 同一 request_id 重复调用不重复扣（Redis guard + bills 唯一索引双保险）。
@@ -161,6 +190,13 @@ type BillingServiceServer interface {
 	// 从账本重建余额投影（M4 对账兜底）：以 MySQL bills 为权威重算 Redis balance，
 	// 收敛「预扣已扣但落库失败/结算丢失」等任何脏投影。
 	RebuildBalance(context.Context, *RebuildBalanceRequest) (*RebuildBalanceResponse, error)
+	// 入账（R2 商城充值闭环，加法改造）：复用 topups 同步事务路径——
+	// topup 行 + tenants.ledger_balance 同事务，uk_ref(ref_type,ref_id) 为幂等提交点。
+	// 同 ref 重放 no-op：返回当前余额与 created=false。
+	Credit(context.Context, *CreditRequest) (*CreditReply, error)
+	// 退款（R2 商城冲退，加法改造）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
+	// ref 为幂等锚点（topups ref_type="refund", ref_id=ref）。同 ref 重放 no-op：refunded_cent=0。
+	Refund(context.Context, *RefundRequest) (*RefundReply, error)
 	mustEmbedUnimplementedBillingServiceServer()
 }
 
@@ -191,6 +227,12 @@ func (UnimplementedBillingServiceServer) ValidateAPIKey(context.Context, *Valida
 }
 func (UnimplementedBillingServiceServer) RebuildBalance(context.Context, *RebuildBalanceRequest) (*RebuildBalanceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RebuildBalance not implemented")
+}
+func (UnimplementedBillingServiceServer) Credit(context.Context, *CreditRequest) (*CreditReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Credit not implemented")
+}
+func (UnimplementedBillingServiceServer) Refund(context.Context, *RefundRequest) (*RefundReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Refund not implemented")
 }
 func (UnimplementedBillingServiceServer) mustEmbedUnimplementedBillingServiceServer() {}
 func (UnimplementedBillingServiceServer) testEmbeddedByValue()                        {}
@@ -339,6 +381,42 @@ func _BillingService_RebuildBalance_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BillingService_Credit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreditRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).Credit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_Credit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).Credit(ctx, req.(*CreditRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_Refund_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefundRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).Refund(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_Refund_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).Refund(ctx, req.(*RefundRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BillingService_ServiceDesc is the grpc.ServiceDesc for BillingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -373,6 +451,14 @@ var BillingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RebuildBalance",
 			Handler:    _BillingService_RebuildBalance_Handler,
+		},
+		{
+			MethodName: "Credit",
+			Handler:    _BillingService_Credit_Handler,
+		},
+		{
+			MethodName: "Refund",
+			Handler:    _BillingService_Refund_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
