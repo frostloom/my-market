@@ -1,6 +1,6 @@
 # mall-bff API 契约（spec/api-contract.md）
 
-> 依据 [PRD.md](../PRD.md) v0.3（D14/D15/D17）。App（ArkTS）与 mall-bff 实现的唯一契约；变更先改本文档。
+> 依据 [PRD.md](../PRD.md) v0.4（D14/D15/D17）。mall-bff 的对外 REST 契约（鸿蒙 App 已取消，调用方为脚本/任意客户端）；变更先改本文档。
 > 基地址：`http://<host>:18090/api/v1`
 
 ---
