@@ -43,6 +43,21 @@ func (s *orderServer) CreateCartOrder(ctx context.Context, req *mallv1.CreateCar
 	return toProtoOrder(ord), nil
 }
 
+// CreateRechargeOrder recharge 直购建单（契约 POST /orders kind=recharge 分支）。
+// goods 类型校验（type=2 才可直购）在本服务端，bff 只透传 goods_id。
+func (s *orderServer) CreateRechargeOrder(ctx context.Context, req *mallv1.CreateRechargeOrderReq) (*mallv1.OrderReply, error) {
+	var tenantID, goodsID uint64
+	var idemKey string
+	if req != nil {
+		tenantID, goodsID, idemKey = req.GetTenantId(), req.GetGoodsId(), req.GetIdemKey()
+	}
+	ord, err := s.store.CreateRechargeOrder(ctx, tenantID, goodsID, idemKey)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return toProtoOrder(ord), nil
+}
+
 // GetOrder 单笔订单（契约 GET /orders/{no}）。
 func (s *orderServer) GetOrder(ctx context.Context, req *mallv1.GetOrderReq) (*mallv1.OrderReply, error) {
 	var tenantID uint64

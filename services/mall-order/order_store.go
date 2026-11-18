@@ -11,6 +11,9 @@
 //
 // 幂等实现（不新增判定列）：撞 uk_tenant_idem 时读回原单，行集
 // （goods_id,qty 排序归并后）相同 → 返回原单（200 语义）；不同 → MALL_30003。
+//
+// CreateRechargeOrder（R2 recharge 直购）同构：kind=1 单行 type=credit，
+// 校验 type=2 + on_sale、limited=1 才条件扣库存，payload 指纹 = goods_id。
 package main
 
 import (
@@ -39,10 +42,14 @@ const (
 )
 
 // goods.type / mall_order_items.type 编码（db-schema 注释）。
+// 两表编码数值恰好一致但语义分属两表：goods.type 2=recharge 商品；
+// mall_order_items.type 2=credit 履约行（recharge 行的履约=入账）。
 const (
 	typeGeneral      = 1 // goods: general  → 行履约类型 1 ship
-	typeRecharge     = 2 // goods: recharge → 仅直购，不可进 cart 单（MALL_30007）
+	typeRecharge     = 2 // goods: recharge → 仅直购（CreateRechargeOrder），不可进 cart 单（MALL_30007）
 	typeSubscription = 3 // goods: subscription → 行履约类型 3 subscribe
+
+	typeCredit = 2 // mall_order_items: credit（recharge 直购行，worker 经 billing.Credit 入账）
 )
 
 // mall_orders.status / closed_reason 编码（db-schema 注释）。
@@ -351,6 +358,123 @@ func (s *Store) createCartOrderOnce(ctx context.Context, tenantID uint64, idemKe
 		}
 
 		out = assembleOrder(&row, itemRowsToFull(items, byID))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateRechargeOrder recharge 直购建单（kind=1，单行 type=credit，qty 恒 1）。
+// 事务语义（与 CreateCartOrder 同构，ADR-009）：
+//
+//	BEGIN → 校验商品（type=2 recharge 才可直购，其余 MALL_30007；on_sale=1；
+//	limited=1 时条件扣库存 stock-1，0 行 → MALL_20003 整体回滚；limited=0
+//	不碰库存——recharge 三档种子均为无限量）→ INSERT mall_orders(kind=1,
+//	amount=price_cent) + 单行 mall_order_items(type=2, line_no=1, qty=1,
+//	价格/面值/赠送快照) → COMMIT。
+//
+// 幂等键语义与 CreateCartOrder 一致：作用域 (tenant_id, key)，payload 指纹 =
+// goods_id（复用 resolveIdempotent 行集比较，读回行集 {goods_id,1} 相同 →
+// 返回原单；不同 → MALL_30003）。
+func (s *Store) CreateRechargeOrder(ctx context.Context, tenantID uint64, goodsID uint64, idemKey string) (*Order, error) {
+	if idemKey == "" || len(idemKey) > 64 {
+		return nil, mallerr.E(mallerr.CodeInvalidParam, false, "幂等键必填且不超过 64 字符")
+	}
+	if goodsID == 0 {
+		return nil, mallerr.E(mallerr.CodeInvalidParam, false, "recharge 下单须带 goods_id")
+	}
+
+	// uk_order_no 撞键换单号重试（与 CreateCartOrder 同口径，≤3 次）。
+	const maxNoRetries = 3
+	for attempt := 0; attempt < maxNoRetries; attempt++ {
+		ord, err := s.createRechargeOrderOnce(ctx, tenantID, goodsID, idemKey)
+		if err == nil {
+			return ord, nil
+		}
+		var me *mysqldrv.MySQLError
+		if !errors.As(err, &me) || me.Number != mysqlErrDupEntry {
+			return nil, err
+		}
+		switch {
+		case strings.Contains(me.Message, "uk_tenant_idem"):
+			// 幂等读回比较（payload = {goods_id, 1}）。
+			return s.resolveIdempotent(ctx, tenantID, idemKey, []Line{{GoodsID: goodsID, Qty: 1}})
+		case strings.Contains(me.Message, "uk_order_no"):
+			continue
+		default:
+			return nil, fmt.Errorf("mall-order: unexpected duplicate key: %v", me)
+		}
+	}
+	return nil, mallerr.E(mallerr.CodeInternal, true, "订单号生成重试耗尽（uk_order_no 连续冲突）")
+}
+
+// createRechargeOrderOnce 单次 recharge 建单事务（见 CreateRechargeOrder 注释）。
+func (s *Store) createRechargeOrderOnce(ctx context.Context, tenantID uint64, goodsID uint64, idemKey string) (*Order, error) {
+	var out *Order
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1) 校验商品（普通 SELECT 不加锁：limited 竞态由第 2 步条件更新兜底）。
+		var g goodsRow
+		err := tx.Where("id = ?", goodsID).First(&g).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return mallerr.E(mallerr.CodeGoodsNotFound, false, "商品不存在: %d", goodsID)
+		}
+		if err != nil {
+			return fmt.Errorf("mall-order: load goods %d: %w", goodsID, err)
+		}
+		switch {
+		case g.Type != typeRecharge:
+			return mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
+				"商品 %d 类型不可直购（仅 recharge 支持直购）", goodsID)
+		case g.OnSale != 1:
+			return mallerr.E(mallerr.CodeGoodsOffSale, false, "商品已下架: %d", goodsID)
+		}
+
+		// 2) limited=1 条件扣库存（qty 恒 1）：影响行数 0 = 售罄或并发被抢 →
+		//    MALL_20003 整体回滚；limited=0 不执行（无限量档不碰库存）。
+		if g.Limited == 1 {
+			res := tx.Exec("UPDATE goods SET stock = stock - 1 WHERE id = ? AND stock >= 1", goodsID)
+			if res.Error != nil {
+				return fmt.Errorf("mall-order: deduct stock goods %d: %w", goodsID, res.Error)
+			}
+			if res.RowsAffected == 0 {
+				return mallerr.E(mallerr.CodeOutOfStock, false, "库存不足: 商品 %d", goodsID)
+			}
+		}
+
+		// 3) 订单头（kind=1，amount = 价格快照）+ 单行（type=credit，行号 1）。
+		now := time.Now()
+		row := orderRow{
+			OrderNo:    genOrderNo(),
+			TenantID:   tenantID,
+			Status:     orderStatusCreated,
+			AmountCent: g.PriceCent,
+			IdemKey:    idemKey,
+			Kind:       1,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err // 原样上抛，保留 *mysql.MySQLError 供分流
+		}
+		item := orderItemRow{
+			OrderID:           row.ID,
+			OrderNo:           row.OrderNo,
+			LineNo:            1,
+			Type:              typeCredit,
+			GoodsID:           goodsID,
+			Qty:               1,
+			PriceSnapshotCent: g.PriceCent,
+			FaceValueCent:     g.FaceValueCent,
+			BonusCent:         g.BonusCent,
+			CreatedAt:         now,
+		}
+		if err := tx.Create(&item).Error; err != nil {
+			return fmt.Errorf("mall-order: insert order items: %w", err)
+		}
+
+		out = assembleOrder(&row, itemRowsToFull([]orderItemRow{item}, map[uint64]goodsRow{g.ID: g}))
 		return nil
 	})
 	if err != nil {

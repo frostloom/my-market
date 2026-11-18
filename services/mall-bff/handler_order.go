@@ -91,8 +91,10 @@ type payParamsJSON struct {
 // 端点
 
 // handleCreateOrder POST /orders（头 Idempotency-Key 必填；kind=recharge 直购
-// 行 / kind=cart 结算购物车）。幂等语义（同 key 同 payload 回原单 / 不同 payload
-// MALL_30003）在 mall-order 侧以 (tenant_id, key) 唯一索引承载。
+// 行 → CreateRechargeOrder RPC / kind=cart 结算购物车 → CreateCartOrder RPC）。
+// 幂等语义（同 key 同 payload 回原单 / 不同 payload MALL_30003）在 mall-order
+// 侧以 (tenant_id, key) 唯一索引承载；goods 类型校验（type=2 才可直购）也在
+// order 服务端，bff 只透传 kind/goods_id。
 // 契约 201 响应的 pay_params：R1 支付编排落在 /pay（裁定），建单时下游
 // pay_params_json 恒空 → 出 null（形状稳定，前端先建单后拉起支付）。
 func handleCreateOrder(orders OrderClient) gin.HandlerFunc {
@@ -116,37 +118,38 @@ func handleCreateOrder(orders OrderClient) gin.HandlerFunc {
 			abortWith(c, mallerr.E(mallerr.CodeInvalidParam, false, "请求体须为合法 JSON"))
 			return
 		}
-		var lines []*mallv1.Line
+		// 与其余下游调用同口径：下游调用统一吃 rpcTimeout（终审 M-3），
+		// 不裸用请求 ctx——下游卡死时 5s 内以 MALL_50002 出错而非挂满连接。
+		ctx, cancel := context.WithTimeout(c.Request.Context(), rpcTimeout)
+		defer cancel()
+		var reply *mallv1.OrderReply
 		switch in.Kind {
 		case "recharge":
 			if in.GoodsID == 0 {
 				abortWith(c, mallerr.E(mallerr.CodeInvalidParam, false, "recharge 下单须带 goods_id"))
 				return
 			}
-			lines = []*mallv1.Line{{GoodsId: in.GoodsID, Qty: 1}}
+			reply, err = orders.CreateRechargeOrder(ctx, &mallv1.CreateRechargeOrderReq{
+				TenantId: tenantID(c), GoodsId: in.GoodsID, IdemKey: idem,
+			})
 		case "cart":
 			if !in.FromCart {
 				abortWith(c, mallerr.E(mallerr.CodeInvalidParam, false, "cart 下单须 from_cart=true"))
 				return
 			}
-			// 与其余下游调用同口径：cartLines 也吃 rpcTimeout（终审 M-3），
-			// 不裸用请求 ctx——下游卡死时 5s 内以 MALL_50002 出错而非挂满连接。
-			lctx, lcancel := context.WithTimeout(c.Request.Context(), rpcTimeout)
-			defer lcancel()
-			lines, err = cartLines(lctx, orders, tenantID(c))
+			var lines []*mallv1.Line
+			lines, err = cartLines(ctx, orders, tenantID(c))
 			if err != nil {
 				abortWith(c, err)
 				return
 			}
+			reply, err = orders.CreateCartOrder(ctx, &mallv1.CreateCartOrderReq{
+				TenantId: tenantID(c), IdemKey: idem, Lines: lines,
+			})
 		default:
 			abortWith(c, mallerr.E(mallerr.CodeInvalidParam, false, "kind 须为 recharge|cart"))
 			return
 		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), rpcTimeout)
-		defer cancel()
-		reply, err := orders.CreateCartOrder(ctx, &mallv1.CreateCartOrderReq{
-			TenantId: tenantID(c), IdemKey: idem, Lines: lines,
-		})
 		if err != nil {
 			abortWith(c, err)
 			return

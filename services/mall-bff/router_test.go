@@ -159,10 +159,22 @@ type stubOrder struct {
 	markPaidRec []*mallv1.MarkPaidReq // MarkPaid 收到的请求（回调链路断言用）
 	getOrder    func(context.Context, *mallv1.GetOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
 	markPaid    func(*mallv1.MarkPaidReq) (*mallv1.OrderReply, error)
+	createCart  func(context.Context, *mallv1.CreateCartOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
+	createRech  func(context.Context, *mallv1.CreateRechargeOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
+	cartItems   []*mallv1.CartItem // GetCart 返回行（nil = 空购物车）
 }
 
 func (s *stubOrder) CreateCartOrder(ctx context.Context, req *mallv1.CreateCartOrderReq, co ...grpc.CallOption) (*mallv1.OrderReply, error) {
-	panic("unexpected CreateCartOrder")
+	if s.createCart == nil {
+		panic("unexpected CreateCartOrder")
+	}
+	return s.createCart(ctx, req, co...)
+}
+func (s *stubOrder) CreateRechargeOrder(ctx context.Context, req *mallv1.CreateRechargeOrderReq, co ...grpc.CallOption) (*mallv1.OrderReply, error) {
+	if s.createRech == nil {
+		panic("unexpected CreateRechargeOrder")
+	}
+	return s.createRech(ctx, req, co...)
 }
 func (s *stubOrder) GetOrder(ctx context.Context, req *mallv1.GetOrderReq, co ...grpc.CallOption) (*mallv1.OrderReply, error) {
 	if s.getOrder == nil {
@@ -189,7 +201,7 @@ func (s *stubOrder) RefundOrder(ctx context.Context, req *mallv1.RefundOrderReq,
 	panic("unexpected RefundOrder")
 }
 func (s *stubOrder) GetCart(ctx context.Context, req *mallv1.GetCartReq, co ...grpc.CallOption) (*mallv1.CartReply, error) {
-	return &mallv1.CartReply{}, nil
+	return &mallv1.CartReply{Items: s.cartItems}, nil
 }
 func (s *stubOrder) AddCart(ctx context.Context, req *mallv1.AddCartReq, co ...grpc.CallOption) (*mallv1.CartReply, error) {
 	panic("unexpected AddCart")

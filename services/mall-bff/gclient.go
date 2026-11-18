@@ -28,6 +28,7 @@ type GoodsClient interface {
 // mallv1.OrderServiceClient 一致。
 type OrderClient interface {
 	CreateCartOrder(ctx context.Context, in *mallv1.CreateCartOrderReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
+	CreateRechargeOrder(ctx context.Context, in *mallv1.CreateRechargeOrderReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
 	GetOrder(ctx context.Context, in *mallv1.GetOrderReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
 	ListOrders(ctx context.Context, in *mallv1.ListOrdersReq, opts ...grpc.CallOption) (*mallv1.ListOrdersReply, error)
 	MarkPaid(ctx context.Context, in *mallv1.MarkPaidReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
