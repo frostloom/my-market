@@ -7,10 +7,6 @@ package main
 
 import (
 	"context"
-	"errors"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
 	"github.com/frostloom/my-market/services/mall-gen/mallv1"
@@ -196,31 +192,10 @@ func toProtoGoods(g goodsRow) *mallv1.GoodsItem {
 // tokenEstimateTokensPerCent 营销展示口径：1 分 ≈ 1000 token（非入账依据）。
 const tokenEstimateTokensPerCent = 1000
 
-// toGRPCError mallerr → gRPC status。本服务可产生的契约码：
-// MALL_10005/20005/30007（400 类 → InvalidArgument）、
-// MALL_20001/30001（404 类 → NotFound）、
-// MALL_20002/20003/20004/30003（409 类 → FailedPrecondition），
-// 其余（含无码错误）一律 Internal。
+// toGRPCError mallerr → gRPC status（统一走 pkg/mallerr.ToGRPC 载体：
+// gRPC 码按契约码 HTTP 语义行映射（400→InvalidArgument、404→NotFound、
+// 409→FailedPrecondition、5xxx 三态各归其位），ErrorInfo.Reason 携带
+// MALL 码 + metadata retryable，bff 侧 FromGRPC 还原；无码错误回落 Internal）。
 func toGRPCError(err error) error {
-	var me *mallerr.Error
-	if !errors.As(err, &me) {
-		return status.Error(codes.Internal, err.Error())
-	}
-	switch me.Code {
-	case mallerr.CodeInvalidParam,
-		mallerr.CodeGoodsQtyExceeded,
-		mallerr.CodeGoodsTypeNotAllowed:
-		return status.Error(codes.InvalidArgument, me.Msg)
-	case mallerr.CodeGoodsNotFound,
-		mallerr.CodeOrderNotFound:
-		return status.Error(codes.NotFound, me.Msg)
-	case mallerr.CodeGoodsOffSale,
-		mallerr.CodeOutOfStock,
-		mallerr.CodeCartRowsExceeded,
-		mallerr.CodeIdempotencyConflict,
-		mallerr.CodeOrderStateInvalid:
-		return status.Error(codes.FailedPrecondition, me.Msg)
-	default:
-		return status.Error(codes.Internal, me.Msg)
-	}
+	return mallerr.ToGRPC(err)
 }

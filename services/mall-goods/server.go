@@ -4,10 +4,7 @@ package main
 
 import (
 	"context"
-	"errors"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
@@ -98,20 +95,9 @@ func toProtoItem(r goodsRow, withDetail bool) *mallv1.GoodsItem {
 	return item
 }
 
-// toGRPCError mallerr → gRPC status。本服务可产生的契约码：
-// MALL_10005（参数非法）/ MALL_20001（商品不存在）/ MALL_20006（品类不存在），
-// 其余（含无码错误）一律 Internal。
+// toGRPCError mallerr → gRPC status（统一走 pkg/mallerr.ToGRPC 载体：
+// gRPC 码按契约码 HTTP 语义行映射，ErrorInfo.Reason 携带 MALL 码 +
+// metadata retryable，bff 侧 FromGRPC 还原；无码错误回落 Internal）。
 func toGRPCError(err error) error {
-	var me *mallerr.Error
-	if !errors.As(err, &me) {
-		return status.Error(codes.Internal, err.Error())
-	}
-	switch me.Code {
-	case mallerr.CodeInvalidParam:
-		return status.Error(codes.InvalidArgument, me.Msg)
-	case mallerr.CodeGoodsNotFound, mallerr.CodeCategoryNotFound:
-		return status.Error(codes.NotFound, me.Msg)
-	default:
-		return status.Error(codes.Internal, me.Msg)
-	}
+	return mallerr.ToGRPC(err)
 }
