@@ -960,7 +960,17 @@ func (s *Store) creditCash(ctx context.Context, tenantID uint64, amountCent int6
 			return err
 		}
 		if !inserted {
-			return nil // 并发重放撞 uk_ref：no-op（事务提交点已有人占）
+			// 并发重放撞 uk_ref（提交点被预读到事务之间落库的获胜行占用）。
+			// 口径必须与预读路径一致：复核获胜行租户，跨租户 fail-closed，
+			// 不给错误租户静默 no-op；同租户并发重放才是 no-op。
+			var winner Topup
+			if err := tx.Where("ref_type = ? AND ref_id = ?", refType, refID).First(&winner).Error; err != nil {
+				return err
+			}
+			if winner.TenantID != tenantID {
+				return status.Errorf(codes.FailedPrecondition, "ref 已被其他租户使用: %s/%s", refType, refID)
+			}
+			return nil
 		}
 		created = true
 		return addLedgerBalance(tx, tenantID, amountCent)

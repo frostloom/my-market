@@ -248,6 +248,51 @@ func TestCredit_DuplicateRef_NoOp(t *testing.T) {
 	}
 }
 
+// TestCredit_CrossTenantRef_FailsConsistently 跨租户同 ref 必须 fail-closed（不允许静默 no-op）：
+// uk_ref 全库唯一（不按租户隔离）。租户 B 重放租户 A 已占用的 ref → FailedPrecondition
+// （预读路径）；租户 A 自身重放 → 仍 no-op。口径锚定两条冲突路径（预读 / 事务内撞 uk_ref）
+// 一致：实现侧事务内 !inserted 分支同样复核获胜行租户（并发竞态无法直构，以路径同构覆盖）。
+func TestCredit_CrossTenantRef_FailsConsistently(t *testing.T) {
+	eA := newCreditTestEnv(t, 10_000)
+	eB := newCreditTestEnv(t, 10_000)
+
+	ref := eA.ref("ord_cross_tenant:1")
+	if _, err := eA.svc.Credit(eA.ctx, &billingv1.CreditRequest{
+		TenantId: int64(eA.tenant), AmountCent: 5_000, RefType: "mall", RefId: ref,
+	}); err != nil {
+		t.Fatalf("tenant A first Credit: %v", err)
+	}
+
+	// 租户 B 携带他人 ref → FailedPrecondition，而非 no-op 成功
+	_, err := eB.svc.Credit(eB.ctx, &billingv1.CreditRequest{
+		TenantId: int64(eB.tenant), AmountCent: 5_000, RefType: "mall", RefId: ref,
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("cross-tenant ref: code=%v, want FailedPrecondition（err=%v）", status.Code(err), err)
+	}
+	// B 余额与流水零副作用
+	if bal := eB.ledgerBalance(); bal != 10_000 {
+		t.Fatalf("tenant B ledger balance=%d, want 10000（fail-closed 零副作用）", bal)
+	}
+
+	// 租户 A 自身重放同 ref → 仍然 no-op（幂等不受影响）
+	replay, err := eA.svc.Credit(eA.ctx, &billingv1.CreditRequest{
+		TenantId: int64(eA.tenant), AmountCent: 5_000, RefType: "mall", RefId: ref,
+	})
+	if err != nil {
+		t.Fatalf("tenant A replay Credit: %v", err)
+	}
+	if replay.Created {
+		t.Fatalf("tenant A replay Created=true, want false")
+	}
+	if replay.BalanceCent != 15_000 {
+		t.Fatalf("tenant A replay BalanceCent=%d, want 15000", replay.BalanceCent)
+	}
+	if n := eA.topupCount("mall", ref); n != 1 {
+		t.Fatalf("topup rows=%d, want 1", n)
+	}
+}
+
 // TestCredit_NonPositiveAmount_Rejected 非正金额拒绝：InvalidArgument，零副作用。
 func TestCredit_NonPositiveAmount_Rejected(t *testing.T) {
 	e := newCreditTestEnv(t, 10_000)
