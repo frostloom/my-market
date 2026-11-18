@@ -9,8 +9,10 @@
 // 退避（2^n 秒），retry_count 达 5 → failed 终态（对账介入）。
 // credit 行断电窗口由 billing uk_ref 幂等兜底：Credit 已提交、done 未标 →
 // 重放同 ref no-op → 收敛（恰入账一次，TestWorker_CreditCrashReplay_ExactlyOneTopup）。
-// 并发退款竞态（窗口 R1：快照拉取后被 RefundPaid 作废）由两层防护收口：
-// 执行前复检 pending（缩窗）+ 入账后 done 0 行时 mall-void ref 冲销补偿
+// 并发退款竞态（窗口 R1：快照拉取后被 RefundPaid 作废）两层防护覆盖
+// void-先于-Credit 与 done-已提交两类交错；Credit-已提交-done-不可达交错
+// 见窗口 R1'（未闭合，R4 对账检出）。防护 = 执行前复检 pending（缩窗）+
+// 入账后 done 0 行时 mall-void ref 冲销补偿
 // （creditLine / compensateVoidedCredit；窗口分析见 refund.go 文件头）。
 //
 // 进程内双循环（main.go 起两个 goroutine，退出信号经 ctx 取消优雅停止）：
@@ -307,7 +309,7 @@ func (s *Store) compensateVoidedCredit(ctx context.Context, t fulfillmentTaskRow
 }
 
 // shipLineMock mock 发货（恒成功）：Store.shipLine 的缺省实现（general 行物流
-// 占位）。credit 行不走此路径（真实 billing 入账，见 fulfillLine）；订阅开通
+// 占位）。credit 行不走此路径（真实 billing 入账，见 creditLine）；订阅开通
 // R2.5 接入前由 mock 兜底（种子 301 on_sale=0，实际不会出现订阅行）。
 func shipLineMock(context.Context, fulfillmentTaskRow) error { return nil }
 

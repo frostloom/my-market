@@ -33,7 +33,10 @@
 //     RPC），失败响应 MALL_50003/50002 明确可重试，用户重试即愈。
 //   - 窗口 C（并发重复退款请求）：两请求对同单同 ref 各自冲退 → billing 侧
 //     uk_ref 恰一条流水；终局事务条件更新 WHERE status=fulfilled 只有一个赢家，
-//     输家锁下复查到 refunded → 幂等 no-op。
+//     输家锁下复查到 refunded → 幂等 no-op。billing 侧真并发同 ref 时：赢家
+//     正常冲退、输家 insert 撞 uk 收 FailedPrecondition（mapBillingError 归
+//     MALL_50001），非静默 no-op；输家重试经 [1] 预读已 refunded →
+//     errOrderAlreadyRefunded 哨兵 → server 回 200 当前状态收敛。
 //   - 窗口 R1（退款作废 vs 正在执行的 credit 履约）：worker 批拉 pending 快照
 //     → RefundPaid 作废行+翻 refunded → worker 仍按快照执行 creditLine →
 //     billing.Credit 真实入账 → done 条件更新 0 行静默跳过 → 租户白得余额。
@@ -43,6 +46,16 @@
 //     补偿 + WARN 日志。残留：复检与 Credit 之间的亚毫秒窗口由补偿兜底；
 //     补偿自身失败不重试（行已 voided 不可重放），ERROR 日志交对账检出
 //     （billing 侧 mall:* 与 mall-refund:*/mall-void:* 流水交叉核对，R4 对账 job）。
+//   - 窗口 R1'（终审补充；Credit-已提交-done-不可达）：Credit 已在 billing
+//     提交、但任务行永远到不了 done 的两种形态——(a) worker 在 Credit 返回后、
+//     done 条件更新前崩溃（毫秒间隙）；(b) Credit 客户端超时但 billing 已提交
+//     （ambiguous commit），行进退避窗仍 pending。此时 RefundPaid 的两道守卫
+//     （前置 COUNT 与 1.5 FOR UPDATE 复查）只统计 status=done 行、均放行，
+//     void 后订单翻 refunded：租户既留余额又拿退款；mall-void 补偿因行已
+//     voided 不再触发，亦无 ERROR 日志。处置：本交错未闭合，属已知残窗；
+//     检出路径 = R4 对账 job 的 mall:* 入账流水与 mall-refund:*/mall-void:*
+//     交叉核对（该构型恰好命中）；缓解 = 毫秒级窗口 + 无攻击可控原语 +
+//     当前 mock 支付（真钱接入 P5 前须评估）。
 //   - 窗口 R2（done 已标 vs promote 前）：任务行 done（已真实入账）、订单仍
 //     paid → RefundPaid 保留 done 行照常直退 → 租户既留余额又拿退款。
 //     防护（RefundPaid，Fix Round 1）：直退事务内检出 done credit 行 →
@@ -59,8 +72,9 @@
 //
 // 上述所有窗口里 billing 都是幂等提交点，不需要 mall 侧补偿动作（无"先退钱
 // 再失败且无法收敛"的路径——R1 的冲销补偿是唯一主动补偿，其失败路径显式留
-// 对账）；唯一的代价是窗口 B 期间"账实分离"（billing 已退、mall 未翻），收敛
-// 依赖用户重试——R2 接受此取舍（对账 job 属后续里程碑）。
+// 对账；窗口 R1' 例外——非"无法收敛"而是残窗漏损，未闭合，见上）；唯一的
+// 代价是窗口 B 期间"账实分离"（billing 已退、mall 未翻），收敛依赖用户重试
+// ——R2 接受此取舍（对账 job 属后续里程碑）。
 //
 // 幂等：已 refunded 订单重复退款 → no-op（errOrderAlreadyRefunded 哨兵，
 // server 回 200 当前状态）。错误透传（裁定 3）：billing Unavailable →

@@ -191,7 +191,7 @@ type OrderPage struct {
 type Store struct {
 	db *gorm.DB
 	// shipLine 单行履约执行接缝（worker 注入点）：nil = 进程内 mock（恒成功）。
-	// 仅覆盖 ship/subscribe 行；credit 行走 billing 真实入账通道（见 fulfillLine）。
+	// 仅覆盖 ship/subscribe 行；credit 行走 billing 真实入账通道（见 creditLine）。
 	// 测试注入桩/故障（见 worker_test.go）。
 	shipLine func(ctx context.Context, t fulfillmentTaskRow) error
 	// billing billing 控制面客户端（R2-T3）：credit 行履约 Credit /
