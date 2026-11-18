@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"log"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // worker 节奏常量（brief：履约 10s / 超时扫描 60s / 订单超时 30 分钟）。
@@ -51,7 +49,7 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 	if err := s.db.WithContext(ctx).
 		Where("status = ? AND next_run_at <= NOW(3)", taskStatusPending).
 		Order("id ASC").Limit(fulfillmentBatch).Find(&tasks).Error; err != nil {
-		return 0, gorm.ErrInvalidData
+		return 0, fmt.Errorf("mall-order: pull fulfillment tasks: %w", err)
 	}
 	done := 0
 	touched := make(map[string]bool, len(tasks))
