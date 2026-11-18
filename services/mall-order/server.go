@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
 	"github.com/frostloom/my-market/services/mall-gen/mallv1"
@@ -218,10 +219,20 @@ func toProtoOrder(o *Order) *mallv1.OrderReply {
 		Items:        items,
 		CreatedAt:    o.CreatedAt.Format(timeRFC3339),
 		ClosedReason: o.ClosedReason,
+		PaidAt:       formatRFC3339(o.PaidAt),
+		FulfilledAt:  formatRFC3339(o.FulfilledAt),
 	}
 }
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
+
+// formatRFC3339 时间指针 → 契约字符串（nil=未发生 → 空串，契约 Order 字段口径）。
+func formatRFC3339(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format(timeRFC3339)
+}
 
 // cartReply 购物车视图 → 契约消息。
 func cartReply(v *CartView) *mallv1.CartReply {

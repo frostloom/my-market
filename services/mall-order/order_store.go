@@ -153,7 +153,9 @@ type Order struct {
 	AmountCent   int64
 	IdemKey      string
 	Kind         int8
-	ClosedReason string // ""|timeout|user
+	ClosedReason string     // ""|timeout|user
+	PaidAt       *time.Time // 支付成功时间（nil=未支付）
+	FulfilledAt  *time.Time // 全行履约完成时间（nil=未履约）
 	CreatedAt    time.Time
 	Items        []OrderItem
 }
@@ -540,6 +542,8 @@ func assembleOrder(row *orderRow, items []orderItemFull) *Order {
 		IdemKey:      row.IdemKey,
 		Kind:         row.Kind,
 		ClosedReason: closedReasonName(row.ClosedReason),
+		PaidAt:       row.PaidAt,
+		FulfilledAt:  row.FulfilledAt,
 		CreatedAt:    row.CreatedAt,
 		Items:        make([]OrderItem, 0, len(items)),
 	}
