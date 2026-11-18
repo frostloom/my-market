@@ -1,0 +1,160 @@
+syntax = "proto3";
+
+package mall.v1;
+
+import "common.proto";
+
+option go_package = "github.com/frostloom/my-market/services/mall-gen/mallv1;mallv1";
+
+// OrderService 订单域服务（mall-order 实现）：订单、支付、购物车。
+// 错误统一以 mallerr 码（MALL_xxxxx）承载，gRPC details / BFF 映射见 api-contract §1。
+service OrderService {
+  // 建单：recharge 直购建单，cart 结算建混合单（general+subscription，
+  // 行级价格快照，事务内同库直扣 general 行库存）；契约 POST /orders。
+  rpc CreateCartOrder(CreateCartOrderReq) returns (OrderReply);
+
+  // 单笔订单；契约 GET /orders/{no}（App 轮询履约结果用）。
+  rpc GetOrder(GetOrderReq) returns (OrderReply);
+
+  // 订单列表（游标分页）；契约 GET /orders?cursor=。
+  rpc ListOrders(ListOrdersReq) returns (ListOrdersReply);
+
+  // 支付结果落账（Provider 回调 / mock 内部回调幂等入口）。
+  // paid=true 置 paid；paid=false 失败回调：payment_records 置 failed，
+  // 订单停留 created（R0 台账裁定）。
+  rpc MarkPaid(MarkPaidReq) returns (OrderReply);
+
+  // 取消订单：仅 created 可取消 → closed(user) + 回补库存；幂等（已 closed 返回 200）。
+  rpc CancelOrder(CancelOrderReq) returns (OrderReply);
+
+  // 退款；R1 仅 paid 分支：先作废 pending 履约行再退。
+  rpc RefundOrder(RefundOrderReq) returns (RefundReply);
+
+  // 购物车四操作，请求均带 tenant_id（契约 §4）。
+  rpc GetCart(GetCartReq) returns (CartReply);
+  rpc AddCart(AddCartReq) returns (CartReply);
+  rpc PatchCartQty(PatchCartQtyReq) returns (CartReply);
+  rpc RemoveCart(RemoveCartReq) returns (CartReply);
+}
+
+// Line 下单行（goods_id + 购买数量）。
+message Line {
+  uint64 goods_id = 1;
+  int32 qty = 2;
+}
+
+// CreateCartOrderReq 建单请求。
+// idem_key 为幂等键（契约 §0.4：作用域 (tenant_id, key)，
+// 同 key 同 payload 返回原单，不同 payload 拒绝 MALL_30003）。
+message CreateCartOrderReq {
+  uint64 tenant_id = 1;
+  string idem_key = 2;
+  repeated Line lines = 3;
+}
+
+// GetOrderReq 订单号 + 调用方 tenant（服务端校验隔离）。
+message GetOrderReq {
+  uint64 tenant_id = 1;
+  string order_no = 2;
+}
+
+message ListOrdersReq {
+  uint64 tenant_id = 1;
+  PageReq page = 2;
+}
+
+// MarkPaidReq 支付结果上报。
+// paid=false 表示 Provider 失败回调：payment_records 置 failed、订单停留 created。
+message MarkPaidReq {
+  string order_no = 1;
+  string provider = 2; // mock | stripe
+  string provider_trade_no = 3;
+  int64 amount_cent = 4;
+  bool paid = 5;
+}
+
+message CancelOrderReq {
+  uint64 tenant_id = 1;
+  string order_no = 2;
+}
+
+// RefundOrderReq 退款请求；R1 仅 paid 分支（契约 §5）。
+message RefundOrderReq {
+  uint64 tenant_id = 1;
+  string order_no = 2;
+}
+
+// RefundReply 退款结果（契约：{"status":"refunded","refund_cent":..}）。
+message RefundReply {
+  string status = 1;
+  int64 refund_cent = 2;
+}
+
+// OrderItem 订单行快照（下单时行级价格）。
+// goods_type 编码同 GoodsItem.type：1=general 2=recharge 3=subscription。
+message OrderItem {
+  uint64 goods_id = 1;
+  string goods_name = 2;
+  int32 goods_type = 3;
+  int64 price_cent = 4;
+  int32 qty = 5;
+}
+
+// OrderReply 订单聚合。status ∈ created|paid|fulfilled|closed；
+// pay_params_json 为 Provider 创建支付单返回的 JSON 透传（契约 POST /orders
+// 响应中的 pay_params），无则留空。
+message OrderReply {
+  string order_no = 1;
+  string status = 2;
+  int64 amount_cent = 3;
+  repeated OrderItem items = 4;
+  string created_at = 5;
+  string paid_at = 6;
+  string fulfilled_at = 7;
+  string closed_reason = 8; // user | refund | timeout | 空
+  string pay_params_json = 9;
+}
+
+message ListOrdersReply {
+  repeated OrderReply items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+// CartItem 购物车行（契约 §4：{"id":..,"goods":Goods,"qty":..}）。
+message CartItem {
+  uint64 id = 1;
+  GoodsItem goods = 2;
+  int32 qty = 3;
+}
+
+// CartReply 购物车视图（含合计）。
+message CartReply {
+  repeated CartItem items = 1;
+  int64 total_cent = 2;
+}
+
+message GetCartReq {
+  uint64 tenant_id = 1;
+}
+
+// AddCartReq 加购（upsert：同商品合并 qty；上限 20 行、qty≤99，
+// recharge/秒杀商品拒绝 MALL_30007）。
+message AddCartReq {
+  uint64 tenant_id = 1;
+  uint64 goods_id = 2;
+  int32 qty = 3;
+}
+
+// PatchCartQtyReq 改数量（qty=0 等价删除）。
+message PatchCartQtyReq {
+  uint64 tenant_id = 1;
+  uint64 item_id = 2;
+  int32 qty = 3;
+}
+
+// RemoveCartReq 删购物车行（幂等）。
+message RemoveCartReq {
+  uint64 tenant_id = 1;
+  uint64 item_id = 2;
+}

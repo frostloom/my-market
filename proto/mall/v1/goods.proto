@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package mall.v1;
+
+import "google/protobuf/empty.proto";
+
+import "common.proto";
+
+option go_package = "github.com/frostloom/my-market/services/mall-gen/mallv1;mallv1";
+
+// GoodsService 商品域服务（mall-goods 实现）。
+service GoodsService {
+  // 品类列表（六个，精选为运营位）；契约 GET /categories。
+  rpc ListCategories(google.protobuf.Empty) returns (ListCategoriesReply);
+
+  // 按品类分页取在售商品；契约 GET /goods?category_id=&cursor=&page_size=。
+  rpc ListGoods(ListGoodsReq) returns (ListGoodsReply);
+
+  // 商品详情；契约 GET /goods/{id}。不存在返回码 MALL_20001。
+  rpc GetGoods(GetGoodsReq) returns (GoodsItem);
+}
+
+// ListGoodsReq 品类内分页请求；category_id=0 表示不限品类。
+message ListGoodsReq {
+  uint64 category_id = 1;
+  PageReq page = 2;
+}
+
+// GetGoodsReq 商品详情请求。
+message GetGoodsReq {
+  uint64 id = 1;
+}
+
+message ListCategoriesReply {
+  repeated Category items = 1;
+}
+
+// ListGoodsReply 游标分页响应；next_cursor 为空即到底（契约 §0.3）。
+message ListGoodsReply {
+  repeated GoodsItem items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}

@@ -1,0 +1,9 @@
+version: v2
+# 生成器：protoc-gen-go / protoc-gen-go-grpc（纯 Go 工具链，见根 Makefile make proto）。
+plugins:
+  - local: protoc-gen-go
+    out: services/mall-gen/mallv1
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: services/mall-gen/mallv1
+    opt: paths=source_relative

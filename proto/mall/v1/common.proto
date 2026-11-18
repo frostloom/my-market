@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+// mall.v1 是商城垂直切片（R1）的跨服务契约包。
+// 权威规格：docs/spec/api-contract.md 与 docs/plans/2026-11-18-R1-商城垂直切片.md。
+// 变更先改契约文档，再改这里并 `make proto` 重新生成。
+package mall.v1;
+
+option go_package = "github.com/frostloom/my-market/services/mall-gen/mallv1;mallv1";
+
+// PageReq 键集游标分页请求（api-contract §0.3）。
+// 首页不传 cursor；page_size 默认 20、上限 50（BFF 侧裁剪）。
+message PageReq {
+  string cursor = 1;
+  int32 page_size = 2;
+}
+
+// GoodsItem 商品（列表 / 详情 / 购物车行 / 订单快照引用共用）。
+// type 编码：1=general 2=recharge 3=subscription（契约 §3 的
+// "general|recharge|subscription"）；recharge 附 face_value_cent/bonus_cent。
+message GoodsItem {
+  uint64 id = 1;
+  int32 type = 2;
+  string name = 3;
+  string subtitle = 4;
+  int64 price_cent = 5;
+  int64 orig_price_cent = 6;
+  int64 face_value_cent = 7;
+  int64 bonus_cent = 8;
+  string image_url = 9;
+  int32 stock = 10;
+  bool on_sale = 11;
+  uint64 ref_plan_id = 12; // subscription 引用的订阅套餐 id，其余为 0
+}
+
+// Category 商品品类（六个，精选为运营位）。
+message Category {
+  uint64 id = 1;
+  string name = 2;
+  int32 sort = 3;
+}
