@@ -35,12 +35,14 @@
 
 ## R2 充值闭环
 
-- [ ] billing 新增 Credit gRPC（billing.proto v1 扩展）：单测覆盖「正常入账 / ref 重复 no-op / 金额为正校验」
-- [ ] 旧 403 端点**未被打开**（`curl POST :18080/portal/recharge` 仍 403）
-- [ ] recharge 商品直购：下单→支付→worker Credit→fulfilled；/me/overview 余额 = 面值+赠送
-- [ ] 闭环主线：买包入账 → `POST :18080/v1/chat/completions`（同租户 key）→ 余额扣减 → admin topups 出现 ref_type=mall 流水
-- [ ] 断电演练：支付后立刻 kill -9 mall-order → 重启后 worker 补 Credit，topups 恰好一条（幂等验证）
-- [ ] 退款：paid 直退（无流水）；fulfilled 后退 min(行额度,余额)；消费部分余额后冲退金额 = min 验证
+> 2026-11-19 回填：R2 已完成（6/6 实测 PASS，证据表见 docs/plans/sdd-archive-R2/R2-ledger.md 与 task-4 报告；SMOKE R2 两遍 PASS）。
+
+- [x] billing 新增 Credit gRPC（billing.proto v1 扩展）：单测覆盖「正常入账 / ref 重复 no-op / 金额为正校验」
+- [x] 旧 403 端点**未被打开**（`curl POST :18080/portal/recharge` 仍 403）
+- [x] recharge 商品直购：下单→支付→worker Credit→fulfilled；/me/overview 余额 = 面值+赠送
+- [x] 闭环主线：买包入账 → `POST :18080/v1/chat/completions`（同租户 key）→ 余额扣减 → admin topups 出现 ref_type=mall 流水
+- [x] 断电演练：支付后立刻 kill -9 mall-order → 重启后 worker 补 Credit，topups 恰好一条（幂等验证）
+- [x] 退款：paid 直退（无流水）；fulfilled 后退 min(行额度,余额)；消费部分余额后冲退金额 = min 验证
 
 ## R2.5 月卡
 
