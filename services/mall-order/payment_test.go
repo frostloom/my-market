@@ -89,12 +89,14 @@ func TestMarkPaidTx_HappyPath_ThreeTablesConsistent(t *testing.T) {
 
 	ord := createTestOrder(t, s, ctx, testTenantA, "pay-happy", 113, 1)
 
+	// SignatureVerified=true：模拟已验签的 HTTP 回调入口（流水如实记 1）
 	err := s.MarkPaidTx(ctx, Callback{
-		OrderNo:    ord.OrderNo,
-		Provider:   "mock",
-		TradeNo:    "T-pay-happy-1",
-		Paid:       true,
-		AmountCent: ord.AmountCent,
+		OrderNo:           ord.OrderNo,
+		Provider:          "mock",
+		TradeNo:           "T-pay-happy-1",
+		Paid:              true,
+		AmountCent:        ord.AmountCent,
+		SignatureVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("MarkPaidTx: %v", err)
@@ -154,6 +156,12 @@ func TestMarkPaidTx_DuplicateCallbackDifferentAmount(t *testing.T) {
 		Paid: true, AmountCent: ord.AmountCent}
 	if err := s.MarkPaidTx(ctx, first); err != nil {
 		t.Fatalf("首次 MarkPaidTx: %v", err)
+	}
+	// 未置 SignatureVerified（gRPC 内部/mock 通道口径）→ 流水如实记 0
+	var sig int8
+	if err := s.db.Raw("SELECT signature_verified FROM payment_records WHERE order_no = ?", ord.OrderNo).
+		Scan(&sig).Error; err != nil || sig != 0 {
+		t.Fatalf("signature_verified = %d（err=%v），want 0（内部通道不虚报验签）", sig, err)
 	}
 
 	second := first

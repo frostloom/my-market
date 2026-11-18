@@ -176,6 +176,9 @@ type OrderPage struct {
 // Store market 库访问（订单域：写 orders/items、条件扣 stock、购物车）。
 type Store struct {
 	db *gorm.DB
+	// shipLine 单行履约执行接缝（worker 注入点）：nil = 进程内 mock（恒成功）。
+	// 真实渠道接入后赋实现；测试注入桩/故障（见 worker_test.go）。
+	shipLine func(ctx context.Context, t fulfillmentTaskRow) error
 }
 
 // OpenStore 按 DSN 打开 MySQL 连接并 ping 通。

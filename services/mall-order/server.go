@@ -81,6 +81,9 @@ func (s *orderServer) ListOrders(ctx context.Context, req *mallv1.ListOrdersReq)
 // paid=true 置 paid；paid=false 失败回调：payment_records 置 failed，
 // 订单停留 created（R0 台账裁定）。tenant_id 服务端重校验：订单不存在
 // 或不归属该租户 → MALL_30001（与 GetOrder 同口径，不泄漏存在性）。
+// 本入口为受信内部/mock 通道（不经 Verifier），Callback.SignatureVerified
+// 保持 false——payment_records.signature_verified 如实记 0；HTTP 回调入口
+// （MarkPaidFromCallback）验签后记 1。
 func (s *orderServer) MarkPaid(ctx context.Context, req *mallv1.MarkPaidReq) (*mallv1.OrderReply, error) {
 	var tenantID uint64
 	var cb Callback

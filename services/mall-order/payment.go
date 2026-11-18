@@ -80,6 +80,9 @@ type Callback struct {
 	TradeNo    string
 	Paid       bool
 	AmountCent int64
+	// SignatureVerified 验签来源标记（按入口如实落 payment_records）：
+	// HTTP 回调经 Verifier 验签后为 true；gRPC 内部/mock 受信通道为 false。
+	SignatureVerified bool
 }
 
 // Verifier 回调验签函数（HTTP 回调路径注入；mock 为 HMAC-SHA256 占位）。
@@ -144,13 +147,15 @@ func NewHMACVerifier(secret []byte) Verifier {
 }
 
 // MarkPaidFromCallback 验签 → 落账的组合入口（HTTP 回调路径）。
-// 验签失败 → MALL_30005，订单与流水零写入；验签通过后走 MarkPaidTx。
+// 验签失败 → MALL_30005，订单与流水零写入；验签通过后走 MarkPaidTx
+// （SignatureVerified 置 true——流水 signature_verified 按入口如实记录）。
 // 返回落账后的订单（读回最新状态）。
 func (s *Store) MarkPaidFromCallback(ctx context.Context, payload []byte, sig string, verify Verifier) (*Order, error) {
 	cb, err := verify(payload, sig)
 	if err != nil {
 		return nil, mallerr.E(mallerr.CodeCallbackSignInvalid, false, "回调验签失败: %v", err)
 	}
+	cb.SignatureVerified = true
 	if err := s.MarkPaidTx(ctx, cb); err != nil {
 		return nil, err
 	}
@@ -203,7 +208,8 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 			rec := paymentRecordRow{
 				OrderNo: cb.OrderNo, Provider: cb.Provider, ProviderTradeNo: cb.TradeNo,
 				Status: paymentStatusFailed, AmountCent: cb.AmountCent,
-				CallbackPayload: strPtr(string(payloadJSON)), SignatureVerified: 1,
+				CallbackPayload:   strPtr(string(payloadJSON)),
+				SignatureVerified: sigFlag(cb.SignatureVerified),
 			}
 			if err := tx.Create(&rec).Error; err != nil {
 				return fmt.Errorf("mall-order: insert failed record %s: %w", cb.OrderNo, err)
@@ -211,13 +217,14 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 			return nil
 		}
 
-		// 3) 写 paid 流水（新插入 / failed 升级）。
+		// 3) 写 paid 流水（新插入 / failed 升级）；signature_verified 按入口如实
+		//    记录（HTTP 回调=1，gRPC 内部/mock 通道=0）。
 		if hasExisting {
 			if err := tx.Model(&paymentRecordRow{}).Where("id = ?", exist.ID).Updates(map[string]any{
 				"status":             paymentStatusPaid,
 				"amount_cent":        cb.AmountCent,
 				"callback_payload":   string(payloadJSON),
-				"signature_verified": 1,
+				"signature_verified": sigFlag(cb.SignatureVerified),
 			}).Error; err != nil {
 				return fmt.Errorf("mall-order: promote payment record %s: %w", cb.OrderNo, err)
 			}
@@ -225,7 +232,8 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 			rec := paymentRecordRow{
 				OrderNo: cb.OrderNo, Provider: cb.Provider, ProviderTradeNo: cb.TradeNo,
 				Status: paymentStatusPaid, AmountCent: cb.AmountCent,
-				CallbackPayload: strPtr(string(payloadJSON)), SignatureVerified: 1,
+				CallbackPayload:   strPtr(string(payloadJSON)),
+				SignatureVerified: sigFlag(cb.SignatureVerified),
 			}
 			if err := tx.Create(&rec).Error; err != nil {
 				return fmt.Errorf("mall-order: insert payment record %s: %w", cb.OrderNo, err)
@@ -275,3 +283,11 @@ func (s *Store) getOrderByNo(ctx context.Context, orderNo string) (*Order, error
 
 // strPtr *string 辅助（JSON 载荷落库）。
 func strPtr(v string) *string { return &v }
+
+// sigFlag bool → payment_records.signature_verified 编码（1 已验签 / 0 未验签）。
+func sigFlag(v bool) int8 {
+	if v {
+		return 1
+	}
+	return 0
+}

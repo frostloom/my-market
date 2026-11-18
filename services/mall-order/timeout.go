@@ -42,11 +42,11 @@ func (s *Store) CloseTimedOut(ctx context.Context, olderThan time.Duration) (int
 	}
 	n := 0
 	for _, r := range rows {
-		closed, err := s.closeOrder(ctx, r.OrderNo, closedReasonTimeout)
+		_, status, err := s.closeOrder(ctx, r.OrderNo, closedReasonTimeout)
 		if err != nil {
 			return n, err
 		}
-		if closed {
+		if status == orderStatusClosed {
 			n++
 		}
 	}
@@ -75,14 +75,26 @@ func (s *Store) CancelOrder(ctx context.Context, tenantID uint64, orderNo string
 		return mallerr.E(mallerr.CodeOrderStateInvalid, false,
 			"订单状态不允许取消: %s（当前 %s）", orderNo, statusName(row.Status))
 	}
-	_, err = s.closeOrder(ctx, orderNo, closedReasonUser)
-	return err
+	// closeOrder 锁下复查会捕捉预读与关单之间的状态迁移（如并发支付）：
+	// 迁移未发生且终态不是 closed → 取消与该状态冲突，如实 MALL_30002
+	// （不得 200 回包掩盖 paid 状态）。
+	migrated, status, err := s.closeOrder(ctx, orderNo, closedReasonUser)
+	if err != nil {
+		return err
+	}
+	if !migrated && status != orderStatusClosed {
+		return mallerr.E(mallerr.CodeOrderStateInvalid, false,
+			"订单状态不允许取消: %s（当前 %s）", orderNo, statusName(status))
+	}
+	return nil
 }
 
 // closeOrder 单单关单事务：created→closed(reason) 条件更新 + 回补库存。
-// 返回是否发生了实际迁移（幂等扫描计数用）。
-func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bool, error) {
+// 返回是否发生实际迁移，以及锁下终读的订单状态——迁移未发生时调用方按
+// 终态分流（closed → 幂等 no-op；其余 → 状态冲突）。
+func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bool, int8, error) {
 	migrated := false
+	var finalStatus int8
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row orderRow
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -95,7 +107,8 @@ func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bo
 		}
 		// 锁下复查（快照拉取后有并发迁移的可能）
 		if row.Status != orderStatusCreated {
-			return nil // 已非 created：幂等 no-op（不回补库存）
+			finalStatus = row.Status // 已非 created：幂等 no-op（不回补库存）
+			return nil
 		}
 		res := tx.Exec(
 			"UPDATE mall_orders SET status = ?, closed_reason = ?, closed_at = ? "+
@@ -105,12 +118,19 @@ func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bo
 			return fmt.Errorf("mall-order: close order %s: %w", orderNo, res.Error)
 		}
 		if res.RowsAffected == 0 {
+			// 持锁下条件更新 0 行（理论上不可达，防御性重读终态）
+			var cur orderRow
+			if err := tx.Where("order_no = ?", orderNo).First(&cur).Error; err != nil {
+				return fmt.Errorf("mall-order: reload order %s: %w", orderNo, err)
+			}
+			finalStatus = cur.Status
 			return nil
 		}
 		migrated = true
+		finalStatus = orderStatusClosed
 		return restockOrder(tx, orderNo)
 	})
-	return migrated, err
+	return migrated, finalStatus, err
 }
 
 // restockOrder 回补订单行库存（事务内；行快照 qty 按商品累回）。

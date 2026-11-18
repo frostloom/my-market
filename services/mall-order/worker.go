@@ -1,9 +1,11 @@
 // mall-order：履约 outbox worker（ADR-004）。
 //
 // RunFulfillmentOnce 拉一批到期 pending 任务（status=1 且 next_run_at 到期）
-// → 逐行 ship 执行（R1 为进程内 mock，直接成功）→ 标 done；本批触达的订单
-// 若全部行 done 则推进 paid→fulfilled（条件更新幂等）。执行失败 →
-// retry_count+1 指数退避（2^n 秒），retry_count 达 5 → failed 终态（对账介入）。
+// → 逐行 ship 执行（默认进程内 mock，可经 Store.shipLine 注入替换）→ 标
+// done；订单推进 paid→fulfilled 两条路：本批触达订单的精准 promote +
+// 每 tick 一次的全量幂等扫描（自愈"标完 done 后、promote 前崩溃"窗口，
+// 含 failed 行的订单不推进——留给对账）。执行失败 → retry_count+1 指数
+// 退避（2^n 秒），retry_count 达 5 → failed 终态（对账介入）。
 //
 // 进程内双循环（main.go 起两个 goroutine，退出信号经 ctx 取消优雅停止）：
 //   - RunFulfillmentLoop：履约轮询，间隔 10s；
@@ -51,10 +53,14 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 		Order("id ASC").Limit(fulfillmentBatch).Find(&tasks).Error; err != nil {
 		return 0, fmt.Errorf("mall-order: pull fulfillment tasks: %w", err)
 	}
+	ship := s.shipLine
+	if ship == nil {
+		ship = shipLineMock
+	}
 	done := 0
 	touched := make(map[string]bool, len(tasks))
 	for _, t := range tasks {
-		shipErr := s.shipFulfillmentLine(ctx, t)
+		shipErr := ship(ctx, t)
 		if shipErr == nil {
 			// 条件更新幂等：并发 worker / 重放时 RowsAffected=0 不计 done。
 			res := s.db.WithContext(ctx).Exec(
@@ -69,16 +75,19 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		// 失败：retry_count+1 指数退避（2^(retry_count+1) 秒）；
-		// 达上限 → failed 终态。
+		// 失败：retry_count+1 指数退避；达上限 → failed 终态。
+		// MySQL 单表 UPDATE 的 SET 从左到右求值：next_run_at 与 status 必须排在
+		// retry_count 自增之前，引用到的才是旧值——首败延迟 2s，序列 2/4/8/16/32s，
+		// 第 5 次失败（旧 retry_count=4）转 failed 且 retry_count 终值 5（brief/
+		// db-schema"上限 5"口径；若排在自增后会整体提前一拍，退避 4s 起步）。
 		if err := s.db.WithContext(ctx).Exec(
 			"UPDATE fulfillment_tasks "+
-				"SET retry_count = retry_count + 1, "+
-				"    last_error = LEFT(?, 512), "+
-				"    next_run_at = DATE_ADD(NOW(3), INTERVAL POWER(2, retry_count + 1) SECOND), "+
-				"    status = IF(retry_count + 1 >= ?, ?, status) "+
+				"SET next_run_at = DATE_ADD(NOW(3), INTERVAL POWER(2, retry_count + 1) SECOND), "+
+				"    status = IF(retry_count + 1 >= ?, ?, status), "+
+				"    retry_count = retry_count + 1, "+
+				"    last_error = LEFT(?, 512) "+
 				"WHERE id = ? AND status = ?",
-			shipErr.Error(), fulfillmentMaxRetry, taskStatusFailed, t.ID, taskStatusPending).Error; err != nil {
+			fulfillmentMaxRetry, taskStatusFailed, shipErr.Error(), t.ID, taskStatusPending).Error; err != nil {
 			return done, fmt.Errorf("mall-order: backoff task %d: %w", t.ID, err)
 		}
 	}
@@ -90,10 +99,15 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 			return done, err
 		}
 	}
+	// 崩溃自愈扫描：上一 tick 标完 done 后、promote 前崩溃的订单（停留 paid）
+	// 由全量幂等扫描收口；含 failed 行的订单不推进（对账介入）。
+	if _, err := s.promoteAllFulfilled(ctx); err != nil {
+		return done, err
+	}
 	return done, nil
 }
 
-// promoteFulfilled 订单 paid→fulfilled：全部履约行 done（无 pending/failed）。
+// promoteFulfilled 单订单 paid→fulfilled：全部履约行 done（无 pending/failed）。
 // fulfilled_at 用 Go 侧时钟（与 created_at 同源口径）。
 func (s *Store) promoteFulfilled(ctx context.Context, orderNo string) error {
 	res := s.db.WithContext(ctx).Exec(
@@ -110,12 +124,28 @@ func (s *Store) promoteFulfilled(ctx context.Context, orderNo string) error {
 	return nil
 }
 
-// shipFulfillmentLine 执行单行履约。R1 为进程内 mock（恒成功）：
-// 真实渠道接入后按 task_type 分发（1 ship 物流 / 2 credit billing 入账 /
-// 3 subscribe 订阅开通），失败返回 error 走退避重试。
-func (s *Store) shipFulfillmentLine(_ context.Context, _ fulfillmentTaskRow) error {
-	return nil
+// promoteAllFulfilled 全量幂等扫描：所有"paid 且履约行全 done（至少一行，
+// 无 pending/failed，含 failed 的留给对账）"的订单 → fulfilled。
+// 单条 UPDATE，与 touched 精准 promote 并存（幂等无害）；返回推进订单数。
+func (s *Store) promoteAllFulfilled(ctx context.Context) (int64, error) {
+	res := s.db.WithContext(ctx).Exec(
+		"UPDATE mall_orders o "+
+			"SET o.status = ?, o.fulfilled_at = ? "+
+			"WHERE o.status = ? "+
+			"AND EXISTS (SELECT 1 FROM fulfillment_tasks f WHERE f.order_no = o.order_no) "+
+			"AND NOT EXISTS (SELECT 1 FROM fulfillment_tasks f "+
+			"  WHERE f.order_no = o.order_no AND f.status IN (?, ?))",
+		orderStatusFulfilled, time.Now(), orderStatusPaid, taskStatusPending, taskStatusFailed)
+	if res.Error != nil {
+		return 0, fmt.Errorf("mall-order: promote sweep: %w", res.Error)
+	}
+	return res.RowsAffected, nil
 }
+
+// shipLineMock mock 发货（恒成功）：Store.shipLine 的缺省实现。真实渠道接入
+// 后按 task_type 分发（1 ship 物流 / 2 credit billing 入账 / 3 subscribe 订阅
+// 开通），失败返回 error 走退避重试（上限 5 → failed）。
+func shipLineMock(context.Context, fulfillmentTaskRow) error { return nil }
 
 // RunFulfillmentLoop 履约轮询循环（间隔 fulfillmentInterval），ctx 取消即退出。
 func RunFulfillmentLoop(ctx context.Context, s *Store) {
