@@ -27,15 +27,16 @@ func TestCloseTimedOut_ClosesAndRestocks(t *testing.T) {
 	o31 := createTestOrder(t, s, ctx, testTenantA, "timeout-31", 117, 2)
 	o15 := createTestOrder(t, s, ctx, testTenantA, "timeout-15", 117, 1)
 
-	// 回拨 created_at：31 分钟前 / 15 分钟前
+	// 回拨 created_at（Go 侧时钟值，与 CloseTimedOut 的截止线同源）：
+	// 31 分钟前 / 15 分钟前
 	if err := s.db.Exec(
-		"UPDATE mall_orders SET created_at = DATE_SUB(NOW(3), INTERVAL 31 MINUTE) WHERE order_no = ?",
-		o31.OrderNo).Error; err != nil {
+		"UPDATE mall_orders SET created_at = ? WHERE order_no = ?",
+		time.Now().Add(-31*time.Minute), o31.OrderNo).Error; err != nil {
 		t.Fatalf("回拨 31 分钟订单: %v", err)
 	}
 	if err := s.db.Exec(
-		"UPDATE mall_orders SET created_at = DATE_SUB(NOW(3), INTERVAL 15 MINUTE) WHERE order_no = ?",
-		o15.OrderNo).Error; err != nil {
+		"UPDATE mall_orders SET created_at = ? WHERE order_no = ?",
+		time.Now().Add(-15*time.Minute), o15.OrderNo).Error; err != nil {
 		t.Fatalf("回拨 15 分钟订单: %v", err)
 	}
 

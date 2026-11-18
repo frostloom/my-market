@@ -233,14 +233,17 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 
 		// 4) 订单 created→paid 条件更新（幂等闸门）：仅首次迁移时投递履约任务；
 		//    订单已 paid/终态 → 只补流水（上方已写），不重复投递。
+		//    paid_at 用 Go 侧时钟（与 created_at 同源，避免 dev 容器 UTC 会话
+		//    的 NOW(3) 与 Go 本地时间 8h 视差）。
 		res := tx.Exec(
-			"UPDATE mall_orders SET status = ?, paid_at = NOW(3) WHERE order_no = ? AND status = ?",
-			orderStatusPaid, cb.OrderNo, orderStatusCreated)
+			"UPDATE mall_orders SET status = ?, paid_at = ? WHERE order_no = ? AND status = ?",
+			orderStatusPaid, time.Now(), cb.OrderNo, orderStatusCreated)
 		if res.Error != nil {
 			return fmt.Errorf("mall-order: mark order paid %s: %w", cb.OrderNo, res.Error)
 		}
 		if res.RowsAffected == 1 {
 			// INSERT IGNORE：uk_order_line 兜底，重放不炸唯一键。
+			// next_run_at 用 SQL NOW(3)：worker 拉取比较同为 NOW(3)，两侧同钟自洽。
 			if err := tx.Exec(
 				"INSERT IGNORE INTO fulfillment_tasks (order_no, line_no, task_type, status, retry_count, next_run_at) "+
 					"SELECT order_no, line_no, type, ?, 0, NOW(3) FROM mall_order_items WHERE order_no = ?",

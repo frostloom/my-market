@@ -28,12 +28,14 @@ const timeoutScanBatch = 100
 
 // CloseTimedOut 关闭超时未支付订单：created 且 created_at 早于 now-olderThan
 // → closed(timeout) + 回补库存。返回本次实际关闭的订单数。
+// 截止线在 Go 侧计算（created_at 由 Go 侧时钟写入，两边同源；dev MySQL
+// 容器为 UTC 会话，若用 NOW(3) 比对会产生 8h 视差）。
 func (s *Store) CloseTimedOut(ctx context.Context, olderThan time.Duration) (int, error) {
 	// 快照拉候选（无锁）；逐单事务内条件更新兜底并发与重复扫描。
+	cutoff := time.Now().Add(-olderThan)
 	var rows []orderRow
 	if err := s.db.WithContext(ctx).
-		Where("status = ? AND created_at <= DATE_SUB(NOW(3), INTERVAL ? SECOND)",
-			orderStatusCreated, int(olderThan.Seconds())).
+		Where("status = ? AND created_at <= ?", orderStatusCreated, cutoff).
 		Order("id ASC").Limit(timeoutScanBatch).Find(&rows).Error; err != nil {
 		return 0, fmt.Errorf("mall-order: scan timed-out orders: %w", err)
 	}
@@ -95,9 +97,9 @@ func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bo
 			return nil // 已非 created：幂等 no-op（不回补库存）
 		}
 		res := tx.Exec(
-			"UPDATE mall_orders SET status = ?, closed_reason = ?, closed_at = NOW(3) "+
+			"UPDATE mall_orders SET status = ?, closed_reason = ?, closed_at = ? "+
 				"WHERE order_no = ? AND status = ?",
-			orderStatusClosed, reason, orderNo, orderStatusCreated)
+			orderStatusClosed, reason, time.Now(), orderNo, orderStatusCreated)
 		if res.Error != nil {
 			return fmt.Errorf("mall-order: close order %s: %w", orderNo, res.Error)
 		}

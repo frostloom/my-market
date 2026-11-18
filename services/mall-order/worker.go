@@ -94,15 +94,16 @@ func (s *Store) RunFulfillmentOnce(ctx context.Context) (int, error) {
 }
 
 // promoteFulfilled 订单 paid→fulfilled：全部履约行 done（无 pending/failed）。
+// fulfilled_at 用 Go 侧时钟（与 created_at 同源口径）。
 func (s *Store) promoteFulfilled(ctx context.Context, orderNo string) error {
 	res := s.db.WithContext(ctx).Exec(
 		"UPDATE mall_orders o "+
-			"SET o.status = ?, o.fulfilled_at = NOW(3) "+
+			"SET o.status = ?, o.fulfilled_at = ? "+
 			"WHERE o.order_no = ? AND o.status = ? "+
 			"AND EXISTS (SELECT 1 FROM fulfillment_tasks f WHERE f.order_no = o.order_no) "+
 			"AND NOT EXISTS (SELECT 1 FROM fulfillment_tasks f "+
 			"  WHERE f.order_no = o.order_no AND f.status IN (?, ?))",
-		orderStatusFulfilled, orderNo, orderStatusPaid, taskStatusPending, taskStatusFailed)
+		orderStatusFulfilled, time.Now(), orderNo, orderStatusPaid, taskStatusPending, taskStatusFailed)
 	if res.Error != nil {
 		return fmt.Errorf("mall-order: promote fulfilled %s: %w", orderNo, res.Error)
 	}
