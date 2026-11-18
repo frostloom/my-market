@@ -35,6 +35,8 @@ message GoodsItem {
   uint64 ref_plan_id = 12; // subscription 引用的订阅套餐 id，其余为 0
   string detail = 13;      // 详情富文本（仅 GetGoods 填充）
   int64 token_estimate = 14; // recharge 营销展示 token 数（非入账依据）
+  uint64 category_id = 15; // 所属品类 id（列表/详情都带；充值/订阅挂 0）
+  bool limited = 16;       // recharge/subscription 是否限量（限量走 stock）
 }
 
 // Category 商品品类（六个，精选为运营位）。

@@ -85,6 +85,8 @@ func toProtoItem(r goodsRow, withDetail bool) *mallv1.GoodsItem {
 		Stock:         r.Stock,
 		OnSale:        r.OnSale != 0,
 		RefPlanId:     r.RefPlanID,
+		CategoryId:    r.CategoryID, // 列表/详情都带（契约 GoodsItem.category_id）
+		Limited:       r.Limited != 0,
 	}
 	if r.Type == typeRecharge {
 		item.TokenEstimate = tokenEstimate(r.FaceValueCent + r.BonusCent)

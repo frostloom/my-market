@@ -101,6 +101,8 @@ type GoodsItem struct {
 	RefPlanId     uint64                 `protobuf:"varint,12,opt,name=ref_plan_id,json=refPlanId,proto3" json:"ref_plan_id,omitempty"`           // subscription 引用的订阅套餐 id，其余为 0
 	Detail        string                 `protobuf:"bytes,13,opt,name=detail,proto3" json:"detail,omitempty"`                                     // 详情富文本（仅 GetGoods 填充）
 	TokenEstimate int64                  `protobuf:"varint,14,opt,name=token_estimate,json=tokenEstimate,proto3" json:"token_estimate,omitempty"` // recharge 营销展示 token 数（非入账依据）
+	CategoryId    uint64                 `protobuf:"varint,15,opt,name=category_id,json=categoryId,proto3" json:"category_id,omitempty"`          // 所属品类 id（列表/详情都带；充值/订阅挂 0）
+	Limited       bool                   `protobuf:"varint,16,opt,name=limited,proto3" json:"limited,omitempty"`                                  // recharge/subscription 是否限量（限量走 stock）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -233,6 +235,20 @@ func (x *GoodsItem) GetTokenEstimate() int64 {
 	return 0
 }
 
+func (x *GoodsItem) GetCategoryId() uint64 {
+	if x != nil {
+		return x.CategoryId
+	}
+	return 0
+}
+
+func (x *GoodsItem) GetLimited() bool {
+	if x != nil {
+		return x.Limited
+	}
+	return false
+}
+
 // Category 商品品类（六个，精选为运营位）。
 type Category struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -301,7 +317,7 @@ const file_common_proto_rawDesc = "" +
 	"\fcommon.proto\x12\amall.v1\">\n" +
 	"\aPageReq\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\"\x98\x03\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\"\xd3\x03\n" +
 	"\tGoodsItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\x05R\x04type\x12\x12\n" +
@@ -319,7 +335,10 @@ const file_common_proto_rawDesc = "" +
 	"\aon_sale\x18\v \x01(\bR\x06onSale\x12\x1e\n" +
 	"\vref_plan_id\x18\f \x01(\x04R\trefPlanId\x12\x16\n" +
 	"\x06detail\x18\r \x01(\tR\x06detail\x12%\n" +
-	"\x0etoken_estimate\x18\x0e \x01(\x03R\rtokenEstimate\"B\n" +
+	"\x0etoken_estimate\x18\x0e \x01(\x03R\rtokenEstimate\x12\x1f\n" +
+	"\vcategory_id\x18\x0f \x01(\x04R\n" +
+	"categoryId\x12\x18\n" +
+	"\alimited\x18\x10 \x01(\bR\alimited\"B\n" +
 	"\bCategory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +

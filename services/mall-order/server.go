@@ -182,6 +182,8 @@ func toProtoGoods(g goodsRow) *mallv1.GoodsItem {
 		BonusCent:     g.BonusCent,
 		Stock:         int32(g.Stock),
 		OnSale:        g.OnSale != 0,
+		CategoryId:    g.CategoryID,
+		Limited:       g.Limited != 0,
 	}
 	if g.Type == typeRecharge {
 		item.TokenEstimate = (g.FaceValueCent + g.BonusCent) * tokenEstimateTokensPerCent

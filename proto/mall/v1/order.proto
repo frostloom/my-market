@@ -65,12 +65,15 @@ message ListOrdersReq {
 
 // MarkPaidReq 支付结果上报。
 // paid=false 表示 Provider 失败回调：payment_records 置 failed、订单停留 created。
+// tenant_id 供服务端重校验订单归属：与订单 tenant 不符 → MALL_30001
+// （与 GET /orders/{no} 同口径：不区分"不存在"与"非本人订单"）。
 message MarkPaidReq {
   string order_no = 1;
   string provider = 2; // mock | stripe
   string provider_trade_no = 3;
   int64 amount_cent = 4;
   bool paid = 5;
+  uint64 tenant_id = 6;
 }
 
 message CancelOrderReq {
