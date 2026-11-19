@@ -20,7 +20,7 @@ require (
 // ai-gateway import 面（importguard 守卫）。本地开发走 go.work workspace；
 // replace 供容器内 GOWORK=off 构建（Dockerfile 同步 COPY 该目录，见
 // deploy/docker/mall-service.Dockerfile）。
-replace github.com/frostloom/ai-gateway => ./ai-gateway
+replace github.com/frostloom/ai-gateway => ./services/ai-gateway
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

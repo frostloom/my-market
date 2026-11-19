@@ -1,12 +1,12 @@
 # mall-service.Dockerfile 构建上下文瘦身（上下文=仓库根，但镜像构建只需
 # services/ pkg/ proto/ go.mod go.sum）：排除下列大目录/本地产物，上下文
 # 由 ~257MB 降至 KB 级；deploy/compose/.env 含密钥，一并拦在上下文外。
-ai-gateway/
-# R2：mall-order/mall-bff import billingv1（go.mod replace ./ai-gateway），
+services/ai-gateway/
+# R2：mall-order/mall-bff import billingv1（go.mod replace ./services/ai-gateway），
 # 镜像构建需要被替换模块的 go.mod 与 import 面（mall-service.Dockerfile COPY），
 # 从上面整目录排除中精确放行这两项（体量 KB 级）：
-!ai-gateway/go.mod
-!ai-gateway/pkg/proto/billing
+!services/ai-gateway/go.mod
+!services/ai-gateway/pkg/proto/billing
 .git/
 .superpowers/
 docs/

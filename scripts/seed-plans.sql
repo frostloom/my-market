@@ -1,6 +1,6 @@
 -- R2.5-T2: billing 月卡套餐种子（scripts/seed-plans.sql）。
 --
--- 前置：ai_gateway 库 plans 表就绪（ai-gateway/scripts/schema.sql 已建）。
+-- 前置：ai_gateway 库 plans 表就绪（services/ai-gateway/scripts/schema.sql 已建）。
 -- 应用（宿主执行；凭据从 deploy/compose/.env 读，不硬编码、不落 argv）：
 --   PW="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' deploy/compose/.env)"
 --   docker compose -f deploy/compose/docker-compose.yml exec -T \
@@ -11,7 +11,7 @@
 -- （seed-goods.sql 内 SET @r25_plan_id = (SELECT id ...)），套餐缺失会导致
 -- 商品种子写入 NULL 撞 NOT NULL 直接报错（依赖显式化，不静默落 0）。
 --
--- 列值口径：与 ai-gateway/scripts/seed/main.go::seedM7 的「月度·标准」完全一致
+-- 列值口径：与 services/ai-gateway/scripts/seed/main.go::seedM7 的「月度·标准」完全一致
 -- （月费 ¥80 / 30 天 / 每 5h 滚动刷新 / 轻量档 200 万 token）。按 name upsert
 -- （uk_name 幂等，ODKU 更新列值不换 id）：seedM7 先跑/后跑都收敛到同一行，
 -- goods 301 的 ref_plan_id 按名解析始终有效，无 id 硬编码。

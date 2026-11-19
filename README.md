@@ -57,7 +57,7 @@ docs/
   architecture.md           架构与服务流转图（八图）
   spec/                     SDD 规格：api-contract（27 错误码全表）/ db-schema / sequences / acceptance / adr×10
   plans/                    实现计划 + SDD 执行台账归档（每个里程碑的完整审查记录）
-ai-gateway/                 既有 AI 网关（整仓迁入，模块路径不变；仅 5 个加法 RPC，内核零改动）
+services/ai-gateway/         既有 AI 网关（整仓迁入，模块路径不变；仅 5 个加法 RPC，内核零改动）
 services/{mall-bff,mall-goods,mall-order}   商城三服务（根模块）
 pkg/{mallerr,mallpage,importguard}          错误码/游标分页/跨模块 import 守卫
 proto/mall/v1/              商城侧 gRPC 契约（make proto 生成）
@@ -88,4 +88,4 @@ bash scripts/smoke-r2.5.sh                  # 端到端验证（可重复跑）
 
 ## 致谢
 
-商城域构建于既有的 [ai-gateway](ai-gateway/)（OpenAI 兼容多租户模型网关 + 计费平台）之上——计费内核（Redis 原子预扣、幂等结算、对账收敛）一行未动，只做加法。
+商城域构建于既有的 [ai-gateway](services/ai-gateway/)（OpenAI 兼容多租户模型网关 + 计费平台）之上——计费内核（Redis 原子预扣、幂等结算、对账收敛）一行未动，只做加法。

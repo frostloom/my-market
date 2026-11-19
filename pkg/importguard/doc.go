@@ -7,5 +7,7 @@
 //
 // 守卫测试 TestImportBoundary_OnlyPkgProto 用 go/parser 静态扫描两个目录的
 // 全部 .go 文件 import 列表做断言——当前无越界 import 时恒绿（守卫性质，
-// 价值在防未来越界），不依赖任何运行时基建。
+// 价值在防未来越界），不依赖任何运行时基建。services/ai-gateway/ 子树
+// （R2.6 结构归位后位于 services/ 下的独立 Go 模块）不在扫描面——其自身
+// 的 internal 规则由 Go 编译器强制，无需守卫代劳。
 package importguard

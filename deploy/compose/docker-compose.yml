@@ -1,6 +1,6 @@
 # my-market 分 profile compose（R0 infra+ai / R1 mall）。
 #   infra：MySQL(3307, utf8mb4) / Redis(6381) / Kafka(宿主 29092) —— 端口与旧 ai-gateway compose 一致
-#   ai：   gateway / billing / router / agent / mock-provider（本地构建，共享 ai-gateway/deploy/docker/go-service.Dockerfile）
+#   ai：   gateway / billing / router / agent / mock-provider（本地构建，共享 services/ai-gateway/deploy/docker/go-service.Dockerfile）
 #   mall： mall-goods(gRPC 9111/健康口 9110) / mall-order(9112/9120) / mall-bff(18090)
 #          （本地构建，deploy/docker/mall-service.Dockerfile，上下文=仓库根）
 #
@@ -36,7 +36,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       # 首次建库自动建表：schema.sql 自带 CREATE DATABASE/USE ai_gateway（只读挂载，不改 SQL 内容）
-      - ../../ai-gateway/scripts/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ../../services/ai-gateway/scripts/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root}"]
       interval: 5s
@@ -107,7 +107,7 @@ services:
   billing:
     profiles: [ai]
     build:
-      context: ../../ai-gateway
+      context: ../../services/ai-gateway
       dockerfile: deploy/docker/go-service.Dockerfile
       args: { SVC: billing }
     image: my-market/billing:local
@@ -146,7 +146,7 @@ services:
   router:
     profiles: [ai]
     build:
-      context: ../../ai-gateway
+      context: ../../services/ai-gateway
       dockerfile: deploy/docker/go-service.Dockerfile
       args: { SVC: router }
     image: my-market/router:local
@@ -174,7 +174,7 @@ services:
   agent:
     profiles: [ai]
     build:
-      context: ../../ai-gateway
+      context: ../../services/ai-gateway
       dockerfile: deploy/docker/go-service.Dockerfile
       args: { SVC: agent }
     image: my-market/agent:local
@@ -214,7 +214,7 @@ services:
   gateway:
     profiles: [ai]
     build:
-      context: ../../ai-gateway
+      context: ../../services/ai-gateway
       dockerfile: deploy/docker/go-service.Dockerfile
       args: { SVC: gateway }
     image: my-market/gateway:local
@@ -253,7 +253,7 @@ services:
   mock-provider:
     profiles: [ai]
     build:
-      context: ../../ai-gateway
+      context: ../../services/ai-gateway
       dockerfile: deploy/docker/go-service.Dockerfile
       args: { SVC: mock-provider }
     image: my-market/mock-provider:local

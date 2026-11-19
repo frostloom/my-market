@@ -8,8 +8,8 @@
 
 > 2026-11-18 回填：R0 已完成（7/8 勾选；第 8 项旧仓归档=待用户操作，密钥子项已验通过）。
 
-- [x] `ls my-market/ai-gateway/cmd` 与旧仓一致（7 个服务入口 + 工具齐全）；eval/、docs/、web/、scripts/ 已在
-- [x] 旧仓根 `.git`、logs/、.gocache/ **未**迁入（`du -sh my-market/ai-gateway` 无 GB 级目录）
+- [x] `ls my-market/ai-gateway/cmd` 与旧仓一致（7 个服务入口 + 工具齐全）；eval/、docs/、web/、scripts/ 已在（该目录 R2.6 结构归位至 `my-market/services/ai-gateway/`，模块路径不变）
+- [x] 旧仓根 `.git`、logs/、.gocache/ **未**迁入（`du -sh my-market/ai-gateway`——R2.6 后为 `du -sh my-market/services/ai-gateway`——无 GB 级目录）
 - [x] `go.work` 含两个模块：`github.com/frostloom/my-market` + `github.com/frostloom/ai-gateway`；`go build ./...` 两模块均零错误
 - [x] `docker compose -f deploy/compose/docker-compose.yml --profile infra up -d` 起 MySQL 3307 / Redis 6381 / Kafka（宿主 29092 可 `kcat -L -b 127.0.0.1:29092`）
 - [x] `docker compose --profile ai up -d` 起 gateway 全家（compose 显式 `GATEWAY_PORT=18080`）
