@@ -10,6 +10,41 @@ EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至
 ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
 PROFILE = EVAL / 'runtime-profiles/2026-10-13-six-profiles-v1/profiles.json'
 OUT = EVAL / 'paired-pilots/2026-10-14-full-preflight-v1'
+# --- r26-canonical: begin ---
+# R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
+# 整体剥离，因此 canonical_code_bytes() 还原出的字节与冻结 manifest 记录的生成器
+# SHA256（前布局原文）可比对；任何未登记的改动都会使还原哈希不一致而校验失败。
+# 只改消费侧解析，不改写冻结数据。
+def canonical_code_bytes(path=None):
+    text = Path(path or __file__).read_bytes().decode('utf-8')
+    lines, skip = [], False
+    for line in text.split('\n'):
+        if line == R26_BEGIN:
+            skip = True
+        elif line == R26_END:
+            skip = False
+        elif not skip:
+            lines.append(line)
+    text = '\n'.join(lines)
+    for migrated, frozen in MIGRATION_LINES:
+        if migrated not in text:
+            raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+        text = text.replace(migrated, frozen)
+    return text.encode('utf-8')
+
+R26_BEGIN = '# --- r26-canonical: begin ---'
+R26_END = '# --- r26-canonical: end ---'
+MIGRATION_LINES = [
+    ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
+    ("ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'\n",
+     "ARCHIVE = Path('eval/task-definitions/2026-10-12-full-dev-v1')\n"),
+    ("PROFILE = EVAL / 'runtime-profiles/2026-10-13-six-profiles-v1/profiles.json'\n",
+     "PROFILE = Path('eval/runtime-profiles/2026-10-13-six-profiles-v1/profiles.json')\n"),
+    ("OUT = EVAL / 'paired-pilots/2026-10-14-full-preflight-v1'\n",
+     "OUT = ROOT / 'eval/paired-pilots/2026-10-14-full-preflight-v1'\n"),
+    ("sha(canonical_code_bytes())", "sha(Path(__file__).read_bytes())"),
+]
+# --- r26-canonical: end ---
 MANIFEST_SHA = 'afaf5fba49893d2c20e91dc8b0e84c998608b82194d6613a6b6549e289ac4181'
 PROFILE_SHA = '83a78d7492c75e0d153cbb9ca4a1a87aa2f15714ad1e855534a084f4848e257d'
 PRIORITY = ('answer_complete', 'explicit_scope_followup', 'supplement_then_confirm', 'confirm', 'no_subscription')
@@ -139,9 +174,9 @@ def main():
         OUT.mkdir(exist_ok=False)
         (OUT / 'proposal.json').write_bytes(raw)
         (OUT / 'manifest.json').write_bytes(encoded({'schema': 'full-pilot-preparation-manifest.v1',
-            'generator_sha256': sha(Path(__file__).read_bytes()), 'files': {'proposal.json': sha(raw)}}))
+            'generator_sha256': sha(canonical_code_bytes()), 'files': {'proposal.json': sha(raw)}}))
     manifest = json.loads((OUT / 'manifest.json').read_bytes())
-    if manifest['generator_sha256'] != sha(Path(__file__).read_bytes()) or manifest['files'] != {'proposal.json': sha(raw)} or (OUT / 'proposal.json').read_bytes() != raw:
+    if manifest['generator_sha256'] != sha(canonical_code_bytes()) or manifest['files'] != {'proposal.json': sha(raw)} or (OUT / 'proposal.json').read_bytes() != raw:
         raise ValueError('Preparation changed; new version/directory required, do not overwrite old archive')
     print('PASS: 1220 primary tasks / 2440 arms; separate 1851 boundary scenarios; offline only, paid readiness false.')
 

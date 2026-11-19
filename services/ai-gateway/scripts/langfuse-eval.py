@@ -227,11 +227,12 @@ def verify_bindings(directory):
         relative = Path(name)
         if relative.is_absolute() or '..' in relative.parts or relative.suffix not in ('.py', '.go') or sha((root / relative).read_bytes().replace(b'\r\n', b'\n')) != digest:
             raise ValueError('Runtime differs from prepared evaluation')
-    if manifest['generator_sha256'] != sha((root / 'scripts/prepare-observed-customer-pilot.py').read_bytes()):
-        raise ValueError('Preparation generator differs')
     spec = importlib.util.spec_from_file_location('observed_preparation_check', root / 'scripts/prepare-observed-customer-pilot.py')
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
+    # 生成器哈希按 R2.6 canonical 字节比对（与冻结 manifest/prepare 写入口径一致）。
+    if manifest['generator_sha256'] != sha(generator.canonical_code_bytes()):
+        raise ValueError('Preparation generator differs')
     if raw != encoded(generator.prepare(root)):
         raise ValueError('Frozen definitions, profiles or previous preparation differ')
     return sha(raw)

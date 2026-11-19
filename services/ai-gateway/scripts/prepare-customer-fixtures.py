@@ -63,10 +63,10 @@ MIGRATION_LINES = [
      "                'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),\n"
      "                'files': {name: sha(data) for name, data in result.items()}}\n"
      "    if provenance:\n"
-     "        # backend/scorer 记录冻结时的 runtime 代码出处；两者没有归档快照可复现\n"
-     "        # （live.go 在冻结后 2026-10-26 上游已合法演进，当前文件无法重现该哈希），\n"
-     "        # 这里原样保留冻结值参与整体字节比对——manifest 任何被篡改仍会失败，\n"
-     "        # 数据本体（source_sha256/files 全量字节）与生成器 canonical 哈希仍是硬校验。\n"
+     "        # backend pin 记录冻结时的 runtime 代码出处；live.go 无归档快照可复现\n"
+     "        # （冻结后 2026-10-26 上游已合法演进，当前文件无法重现该哈希），这里原样\n"
+     "        # 保留冻结值参与整体字节比对——manifest 任何被篡改仍会失败。scorer\n"
+     "        # （score.go）现哈希与冻结 pin 相等，保持硬校验，不透传。\n"
      "        manifest.update(provenance)\n"
      "    result['manifest.json'] = encode(manifest)\n"
      "    return result\n",
@@ -86,8 +86,7 @@ MIGRATION_LINES = [
     ("def verify(source, output):\n"
      "    output = Path(output)\n"
      "    frozen = json.loads((output / 'manifest.json').read_bytes())\n"
-     "    provenance = {key: frozen[key] for key in ('backend_canonical_sha256', 'scorer_canonical_sha256')\n"
-     "                  if key in frozen}\n"
+     "    provenance = {key: frozen[key] for key in ('backend_canonical_sha256',) if key in frozen}\n"
      "    expected = expected_artifacts(source, provenance)\n",
      "def verify(source, output):\n"
      "    output = Path(output)\n"
@@ -197,10 +196,10 @@ def expected_artifacts(source, provenance=None):
                 'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),
                 'files': {name: sha(data) for name, data in result.items()}}
     if provenance:
-        # backend/scorer 记录冻结时的 runtime 代码出处；两者没有归档快照可复现
-        # （live.go 在冻结后 2026-10-26 上游已合法演进，当前文件无法重现该哈希），
-        # 这里原样保留冻结值参与整体字节比对——manifest 任何被篡改仍会失败，
-        # 数据本体（source_sha256/files 全量字节）与生成器 canonical 哈希仍是硬校验。
+        # backend pin 记录冻结时的 runtime 代码出处；live.go 无归档快照可复现
+        # （冻结后 2026-10-26 上游已合法演进，当前文件无法重现该哈希），这里原样
+        # 保留冻结值参与整体字节比对——manifest 任何被篡改仍会失败。scorer
+        # （score.go）现哈希与冻结 pin 相等，保持硬校验，不透传。
         manifest.update(provenance)
     result['manifest.json'] = encode(manifest)
     return result
@@ -218,8 +217,7 @@ def export(source, output):
 def verify(source, output):
     output = Path(output)
     frozen = json.loads((output / 'manifest.json').read_bytes())
-    provenance = {key: frozen[key] for key in ('backend_canonical_sha256', 'scorer_canonical_sha256')
-                  if key in frozen}
+    provenance = {key: frozen[key] for key in ('backend_canonical_sha256',) if key in frozen}
     expected = expected_artifacts(source, provenance)
     if {p.name for p in output.iterdir()} != set(expected):
         raise ValueError('Artifact set changed')

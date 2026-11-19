@@ -99,6 +99,9 @@ MIGRATION_LINES = [
      "        path = (ROOT / name).resolve()\n"
      "        if ROOT not in path.parents or sha(path.read_bytes()) != digest:\n"
      "            raise ValueError('Source hash mismatch: ' + name)\n"),
+    ("        'sources': {p.relative_to(ROOT).as_posix() if p.is_relative_to(ROOT)\n"
+     "                    else 'eval/' + p.relative_to(EVAL).as_posix(): sha(p.read_bytes()) for p in sources},",
+     "        'sources': {str(p.relative_to(ROOT)).replace('\\\\', '/'): sha(p.read_bytes()) for p in sources},"),
     ("sha(canonical_code_bytes())", "sha(Path(__file__).read_bytes())"),
 ]
 # --- r26-canonical: end ---
@@ -379,7 +382,8 @@ def export(output):
     manifest = {'schema_version': 1, 'version': 'customer-service-contract-v1', 'count': len(cases),
         'normalization_count': len(proof), 'human_independent_review_count': 0,
         'annotation_status': 'ai_posthoc_not_independent_gold', 'fixture_count': 0,
-        'sources': {str(p.relative_to(ROOT)).replace('\\', '/'): sha(p.read_bytes()) for p in sources},
+        'sources': {p.relative_to(ROOT).as_posix() if p.is_relative_to(ROOT)
+                    else 'eval/' + p.relative_to(EVAL).as_posix(): sha(p.read_bytes()) for p in sources},
         'exporter_sha256': sha(canonical_code_bytes()),
         'action_counts': dict(Counter(c['expected_action'] for c in cases))}
     write_new(output / 'cases.json', cases)

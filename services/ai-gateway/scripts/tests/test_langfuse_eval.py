@@ -176,7 +176,7 @@ class LangfuseEvaluationTests(unittest.TestCase):
             p = Path(directory)
             (p / 'proposal.json').write_bytes(raw)
             (p / 'manifest.json').write_bytes(m.encoded({'schema': 'observed-preparation-manifest.v2',
-                'generator_sha256': m.sha((ROOT / 'scripts/prepare-observed-customer-pilot.py').read_bytes()),
+                'generator_sha256': generator.base.sha(generator.canonical_code_bytes()),
                 'files': {'proposal.json': m.sha(raw)}}))
             self.assertEqual(m.verify_bindings(p), m.sha(raw))
             original = Path.read_bytes
