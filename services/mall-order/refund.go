@@ -227,7 +227,7 @@ func (s *Store) RefundFulfilled(ctx context.Context, tenantID uint64, orderNo st
 				if status.Code(err) == codes.NotFound {
 					// 无生效/当期订阅可退订：视同已退订 no-op（重放时订阅自然到期
 					// 的合法形态；权益不存在则"退款后不再续费"不变量平凡成立）。
-					log.Printf("[worker] info 退订 no-op（无生效订阅，视同已退订）: order=%s line=%d",
+					log.Printf("[refund] info 退订 no-op（无生效订阅，视同已退订）: order=%s line=%d",
 						orderNo, it.LineNo)
 					continue
 				}
