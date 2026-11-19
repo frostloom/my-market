@@ -28,7 +28,7 @@ func runAgentPairOwnedEnvironment(t *testing.T, reverse bool) {
 	var reports []SmallPairReport
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	env, e := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"})
+	env, e := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -37,7 +37,7 @@ func runAgentPairOwnedEnvironment(t *testing.T, reverse bool) {
 			t.Error(err)
 		}
 	})
-	source, e := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	source, e := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -135,7 +135,7 @@ func runAgentPairOwnedEnvironment(t *testing.T, reverse bool) {
 			if key == "balance-020/explicit_scope_followup" {
 				confidence = .5
 			}
-			opts := AgentPairOptions{AllowExecution: true, AllowJEVCalls: true, MaxJEVCalls: 4, DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", Config: cfg, Environment: env, Budget: budget, Model: model, JEVFactory: func() jev.Evaluator {
+			opts := AgentPairOptions{AllowExecution: true, AllowJEVCalls: true, MaxJEVCalls: 4, DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", Config: cfg, Environment: env, Budget: budget, Model: model, JEVFactory: func() jev.Evaluator {
 				return jev.NewFake(localJevScript(tool, confidence), localJevScript(tool, confidence))
 			}}
 			path := filepath.Join(dir, "run.jsonl")

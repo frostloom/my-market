@@ -10,15 +10,15 @@ import (
 
 func campaignPreparationInputs(t *testing.T) (ConversationSuite, PairedProfiles, CampaignPreparationPlan) {
 	t.Helper()
-	s, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	s, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := LoadPairedProfiles("../../eval/runtime-profiles/2026-10-13-six-profiles-v1")
+	p, err := LoadPairedProfiles("../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile("../../eval/paired-pilots/2026-10-21-execution-envelope/execution-proposal.json")
+	raw, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-21-execution-envelope/execution-proposal.json")
 	if err != nil {
 		t.Fatal(err)
 	}

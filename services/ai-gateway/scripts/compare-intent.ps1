@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Baseline,
     [Parameter(Mandatory = $true)][string]$Experiment,
-    [string]$Out = 'eval/reports/comparison'
+    [string]$Out = '../../eval/ai-gateway/reports/comparison'
 )
 $ErrorActionPreference = 'Stop'
 go run ./cmd/eval -suite compare -baseline $Baseline -experiment $Experiment -out $Out

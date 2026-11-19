@@ -10,7 +10,7 @@ import (
 
 func cancelRechargeInputs(t *testing.T) ([]byte, []byte, []byte, []byte) {
 	t.Helper()
-	base := "../../eval/paired-pilots/2026-10-24-recharge-cancel-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-recharge-cancel-entry"
 	read := func(n string) []byte {
 		r, e := os.ReadFile(filepath.Join(base, n))
 		if e != nil {
@@ -33,7 +33,7 @@ func TestCancelRechargeScopeBinding(t *testing.T) {
 	if err != nil || pilot.Ready() || !hasString(pilot.Blockers(), "runtime_contract_mismatch") || pilot.CampaignID() != "recharge-cancel-20261024" {
 		t.Fatalf("cancel rejected: %v %v", err, pilot.Blockers())
 	}
-	if err := pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err == nil {
+	if err := pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err == nil {
 		t.Fatal("historical contract accepted execution")
 	}
 	for _, key := range []string{"schema", "campaign_id", "case_key", "execution_revision", "customer_source_revision", "runtime_contract_sha256", "budget_ceiling_sha256", "prior_offline_manifest_sha256", "prior_offline_acceptance_sha256", "diagnostic_source_revision", "diagnostic_manifest_sha256", "scope_plan_sha256", "prior_journal_sha256", "prior_review_sha256"} {

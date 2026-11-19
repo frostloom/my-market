@@ -37,7 +37,7 @@ func TestWindowV12DeclarationVectors(t *testing.T) {
 		t.Fatal(e)
 	}
 	want = append(want, '\n')
-	name := filepath.Join("..", "..", "eval", "behavior-review", "fixtures", "v12-contracts", "go-declarations.json")
+	name := filepath.Join("..", "..", "..", "..", "eval", "ai-gateway", "behavior-review", "fixtures", "v12-contracts", "go-declarations.json")
 	if os.Getenv("TASKBENCH_UPDATE_V12_DECLARATION_VECTORS") == "1" {
 		if e = os.MkdirAll(filepath.Dir(name), 0755); e != nil {
 			t.Fatal(e)

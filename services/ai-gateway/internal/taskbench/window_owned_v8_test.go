@@ -35,7 +35,7 @@ func TestWindowV8OwnedHandlerRetryDoesNotRepeatTool(t *testing.T) {
 func testWindowV8OwnedHandlerRetry(t *testing.T, failAt int64) {
 	c, r := fixtureWindowV8Campaign(t, "model", false, collectionPolicySHA())
 	source, _, _ := windowScopeInputs(t)
-	env, err := OpenPairedFixtureEnvironment(context.Background(), PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"})
+	env, err := OpenPairedFixtureEnvironment(context.Background(), PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}

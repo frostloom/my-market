@@ -6,7 +6,7 @@
 //   - 本文件是「分类指标」模型：给出 N 条真实用户说法，只看**路由到哪个工具**，
 //     算 Top-1 准确率 / Macro-F1 / OOS 误调用率等。适合量化「接入 JEV 前后」的差异。
 //
-// 数据集在 eval/intent-suite/（12 类 × 100 条 + 对抗子集），由
+// 数据集在仓库顶层评测资产 eval/ai-gateway/intent-suite/（12 类 × 100 条 + 对抗子集），由
 // web/scripts/gen-intent-suite.mjs 生成、verify-intent-suite.mjs 校验。
 package agent
 

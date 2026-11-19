@@ -47,8 +47,8 @@ func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
 	f := flag.NewFlagSet("full-customer-preflight", flag.ContinueOnError)
-	definitions := f.String("definitions", "eval/task-definitions/2026-10-12-full-dev-v1", "frozen definitions")
-	profilesDir := f.String("profiles", "eval/runtime-profiles/2026-10-13-six-profiles-v1", "pinned runtime profiles")
+	definitions := f.String("definitions", "../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "frozen definitions")
+	profilesDir := f.String("profiles", "../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", "pinned runtime profiles")
 	revision := f.String("revision", "", "explicit source revision; code provenance must be archived separately")
 	out := f.String("out", "", "new offline JSON path")
 	if f.Parse(args) != nil || f.NArg() != 0 || *out == "" || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(*revision) {

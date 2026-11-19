@@ -16,7 +16,7 @@ import (
 )
 
 func campaignCLIArgs(out, plan, base string) []string {
-	return []string{"-mode", "campaign-preflight", "-definitions", "../../eval/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", "-model-base", base, "-model-name", "deepseek-v4.1-flash", "-protocol", "anthropic", "-revision", "reviewed-revision", "-jev-model", "jev-1.13.0", "-campaign-plan", plan, "-out", out}
+	return []string{"-mode", "campaign-preflight", "-definitions", "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", "-model-base", base, "-model-name", "deepseek-v4.1-flash", "-protocol", "anthropic", "-revision", "reviewed-revision", "-jev-model", "jev-1.13.0", "-campaign-plan", plan, "-out", out}
 }
 
 func TestPairedCLICampaignPreflightOffline(t *testing.T) {
@@ -27,7 +27,7 @@ func TestPairedCLICampaignPreflightOffline(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "do-not-read-this-jev-key")
 	dir := t.TempDir()
 	out := filepath.Join(dir, "proposal.json")
-	args := campaignCLIArgs(out, "../../eval/paired-pilots/2026-10-22-campaign-preflight/plan.json", srv.URL)
+	args := campaignCLIArgs(out, "../../../../eval/ai-gateway/paired-pilots/2026-10-22-campaign-preflight/plan.json", srv.URL)
 	if run(args) != 0 {
 		t.Fatal("campaign preflight rejected")
 	}
@@ -56,7 +56,7 @@ func TestPairedCLICampaignPreflightOffline(t *testing.T) {
 }
 
 func TestPairedCLICampaignPreflightRejectsInvalidInputs(t *testing.T) {
-	planPath := "../../eval/paired-pilots/2026-10-22-campaign-preflight/plan.json"
+	planPath := "../../../../eval/ai-gateway/paired-pilots/2026-10-22-campaign-preflight/plan.json"
 	raw, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestPairedCLICampaignPreflightRejectsInvalidInputs(t *testing.T) {
 
 func TestPairedCLIPrepareOfflineAndNoOverwrite(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "plan.json")
-	args := []string{"-mode", "prepare", "-definitions", "../../eval/task-definitions/2026-10-12-full-dev-v1", "-out", p}
+	args := []string{"-mode", "prepare", "-definitions", "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "-out", p}
 	if n := run(args); n != 0 {
 		t.Fatalf("exit=%d", n)
 	}
@@ -139,7 +139,7 @@ func TestPairedCLIDoesNotAcceptLiveFlags(t *testing.T) {
 
 func TestPairedCLIExplicitPreflightIsOfflineAndNotPaidReady(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "preflight.json")
-	args := []string{"-mode", "preflight", "-definitions", "../../eval/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", "-model-base", "https://maas.qianwenaiapi.com/apps/anthropic", "-model-name", "deepseek-v4.1-flash", "-protocol", "anthropic", "-revision", "reviewed-revision", "-jev-model", "jev-1.13.0", "-out", p}
+	args := []string{"-mode", "preflight", "-definitions", "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", "-model-base", "https://maas.qianwenaiapi.com/apps/anthropic", "-model-name", "deepseek-v4.1-flash", "-protocol", "anthropic", "-revision", "reviewed-revision", "-jev-model", "jev-1.13.0", "-out", p}
 	if n := run(args); n != 0 {
 		t.Fatalf("preflight exit %d", n)
 	}
@@ -158,7 +158,7 @@ func TestPairedCLIExplicitPreflightIsOfflineAndNotPaidReady(t *testing.T) {
 }
 
 func TestPairedCLIReportsFailedArmsWithoutDroppingThem(t *testing.T) {
-	s, e := taskbench.LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	s, e := taskbench.LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if e != nil {
 		t.Fatal(e)
 	}

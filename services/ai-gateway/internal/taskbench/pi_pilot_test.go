@@ -89,7 +89,7 @@ func TestPiPilotDoesNotReuseLegacyPermissionOrBilling(t *testing.T) {
 	if err != nil || pilot.Ready() || len(pilot.Blockers()) != 3 {
 		t.Fatalf("permission became billing evidence: %v", err)
 	}
-	if err := pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
+	if err := pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
 		t.Fatal(err)
 	}
 	if ready, err := CheckAuthorizedPilot(a, p, b, e); err != nil || !ready.Ready() {

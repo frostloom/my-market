@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const frozenDefinitionsDir = "../../eval/task-definitions/2026-10-12-full-dev-v1"
+const frozenDefinitionsDir = "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1"
 
 func TestCampaignIsOnePassTwoArms(t *testing.T) {
 	campaign, err := LoadCampaign(frozenDefinitionsDir)

@@ -13,8 +13,8 @@ func TestAuthorizedFrozenInputsRejectBeforeResourceCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defs := "../../eval/task-definitions/2026-10-12-full-dev-v1"
-	profiles := "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"
+	defs := "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1"
+	profiles := "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"
 	if err := pilot.ValidateFrozenInputs(defs, profiles, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
 		t.Fatal(err)
 	}
@@ -32,11 +32,11 @@ func TestAuthorizedFrozenInputsRejectBeforeResourceCreation(t *testing.T) {
 
 func authorizedEntryInputs(t *testing.T) ([]byte, []byte, []byte, []byte) {
 	t.Helper()
-	a, err := os.ReadFile("../../eval/paired-pilots/2026-10-22-authorized-small-pilot/authorization.json")
+	a, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-22-authorized-small-pilot/authorization.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := os.ReadFile("../../eval/paired-pilots/2026-10-22-campaign-preflight/plan.json")
+	p, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-22-campaign-preflight/plan.json")
 	if err != nil {
 		t.Fatal(err)
 	}

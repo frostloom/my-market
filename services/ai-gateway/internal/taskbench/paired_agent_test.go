@@ -50,7 +50,7 @@ func TestPreparedPairRealAgentLocalBudget(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": msg}}, "usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 8}})
 	}))
 	defer provider.Close()
-	suite, e := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	suite, e := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if e != nil {
 		t.Fatal(e)
 	}

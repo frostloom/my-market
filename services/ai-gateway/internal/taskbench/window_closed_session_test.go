@@ -19,7 +19,7 @@ func closedSessionOptions(t *testing.T) FullWindowClosedOptions {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return FullWindowClosedOptions{DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", NewPrivateRoot: filepath.Join(parent, "closed"), Width: 1, DeclaredSourceRevision: strings.Repeat("b", 40), AllowFixtureCreation: true, LoopbackAdminDSN: "root:root@tcp(127.0.0.1:3307)/"}
+	return FullWindowClosedOptions{DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", NewPrivateRoot: filepath.Join(parent, "closed"), Width: 1, DeclaredSourceRevision: strings.Repeat("b", 40), AllowFixtureCreation: true, LoopbackAdminDSN: "root:root@tcp(127.0.0.1:3307)/"}
 }
 func TestFullWindowClosedStartupAndInvalidOperation(t *testing.T) {
 	for _, kind := range []string{"index", "prior", "cancel", "persist", "owner"} {

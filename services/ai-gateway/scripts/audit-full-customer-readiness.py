@@ -7,8 +7,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 CLAIM_SHA = 'f09de5bb9ab4147f140f54db7a25c5f419b7a4e48137d63c1782ea7c38d768b3'
-PRICING = Path('eval/paired-pilots/2026-10-27-receiver-repeated-entry/pricing.json')
+PRICING = EVAL / 'paired-pilots/2026-10-27-receiver-repeated-entry/pricing.json'
 PILOT_KEYS = frozenset([
     'balance-001/answer_complete', 'plans-001/answer_complete',
     'bills-001/answer_complete', 'consumption-001/answer_complete',

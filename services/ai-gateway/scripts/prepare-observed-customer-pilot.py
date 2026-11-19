@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'eval/paired-pilots/2026-10-17-jev-proxy-preflight-v4'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+OUT = EVAL / 'paired-pilots/2026-10-17-jev-proxy-preflight-v4'
 spec = importlib.util.spec_from_file_location('full_pilot_base', ROOT / 'scripts/prepare-full-customer-pilot.py')
 base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
@@ -20,7 +21,7 @@ EXTRA_FILES = ('internal/agent/telemetry.go', 'internal/agent/observability.go',
 def prepare(root):
     p = base.prepare(root)
     p['schema'] = 'full-pilot-observed-preparation.v2'
-    p['source_bindings']['previous_proposal_sha256'] = base.sha((root / 'eval/paired-pilots/2026-10-14-full-preflight-v1/proposal.json').read_bytes())
+    p['source_bindings']['previous_proposal_sha256'] = base.sha((EVAL / 'paired-pilots/2026-10-14-full-preflight-v1/proposal.json').read_bytes())
     hashes = p['source_bindings']['runtime_files_sha256']
     hashes.update({name: base.sha((root / name).read_bytes().replace(b'\r\n', b'\n')) for name in EXTRA_FILES})
     p['observability_requirements'] = {

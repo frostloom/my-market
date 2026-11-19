@@ -4,8 +4,8 @@
 //
 // 用法：
 //
-//	autoroute-bench -records eval/campaigns/2026-11-10-langfuse-r2/records \
-//	  -labels labels.json -out eval/autoroute/l2-2026-11-17 \
+//	autoroute-bench -records ../../eval/ai-gateway/campaigns/2026-11-10-langfuse-r2/records \
+//	  -labels labels.json -out ../../eval/ai-gateway/autoroute/l2-2026-11-17 \
 //	  -subset 100 -reps 4 -workers 3
 //
 // 付费运行需环境变量 JEV_API_KEY（可选 JEV_HTTPS_PROXY）；-dry-run 使用确定性

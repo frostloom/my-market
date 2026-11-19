@@ -8,7 +8,8 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "eval/experiments/2026-10-08-deepseek-flash"
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+OUTPUT = EVAL / "experiments/2026-10-08-deepseek-flash"
 SOURCES = [
     "deepseek-flash-pilot-1791453708918",
     "deepseek-flash-full-1791453809005",
@@ -44,7 +45,7 @@ def latencies(values):
 def main():
     if OUTPUT.exists():
         raise SystemExit("Archive already exists; preserved unchanged.")
-    reports = {arm: json.loads((ROOT / "eval/reports" / SOURCES[-1] / arm / "tasks.json").read_bytes()) for arm in ARMS}
+    reports = {arm: json.loads((EVAL / "reports" / SOURCES[-1] / arm / "tasks.json").read_bytes()) for arm in ARMS}
     assert {d["schema"] for d in reports.values()} == {"taskbench.v2"}
     assert len({d["dataset_sha256"] for d in reports.values()}) == 1
     assert len({d["metadata"]["evaluator_binary_sha256"] for d in reports.values()}) == 1
@@ -76,7 +77,7 @@ def main():
                          "candidate": latencies([new[i]["duration_ms"] for i in ids])}
     intent = {}
     for arm in ARMS:
-        p, = (ROOT / "eval/reports" / SOURCES[1] / arm).glob("intent-*.json")
+        p, = (EVAL / "reports" / SOURCES[1] / arm).glob("intent-*.json")
         intent[arm] = json.loads(p.read_bytes())["Metrics"]
     summary = {"schema": "task-experiment-comparison.v1", "task_source": SOURCES[-1],
                "task_scoring": "taskbench.v2", "same_dataset": True, "unique_tenants": 96,
@@ -135,7 +136,7 @@ def main():
                 secrets.append(value.encode())
     pending = []
     for source in SOURCES:
-        directory = ROOT / "eval/reports" / source
+        directory = EVAL / "reports" / source
         assert directory.is_dir(), source
         for p in sorted(directory.rglob("*")):
             if p.is_file() and p.suffix in {".json", ".md", ".txt", ".log", ".patch"}:
@@ -148,11 +149,11 @@ def main():
                           ("cases.json", case_raw)]:
         write(OUTPUT / filename, raw)
     # The existing independent verifier is unchanged and also works offline here.
-    verifier = (ROOT / "eval/experiments/2026-10-08/verify.py").read_bytes()
+    verifier = (EVAL / "experiments/2026-10-08/verify.py").read_bytes()
     write(OUTPUT / "verify.py", verifier)
     entries = []
     for p, raw in pending:
-        relative = p.relative_to(ROOT / "eval/reports")
+        relative = p.relative_to(EVAL / "reports")
         compressed = gzip.compress(raw, compresslevel=9, mtime=0)
         archive = Path("raw") / Path(str(relative) + ".gz")
         write(OUTPUT / archive, compressed)

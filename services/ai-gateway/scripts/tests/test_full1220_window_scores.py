@@ -1175,7 +1175,7 @@ def v4_fixture(base=None):
     m['schema'] = 'full-window-actual-ready.v4'; scope['schema'] = 'full-window-scope.v4'
     scope['baseline_evidence_sha256'] = '12a9d584ea9508a9fc7701532ad9214b0c743a8e13d17829432fac0d6b48a20c'
     scope['budget_approval_sha256'] = 'd5062e6f39f9ae7c9a8461121f9ba907c798100d7a5428af72da459595d2d554'
-    declaration = json.loads((SCRIPT.parents[1]/'eval/paired-pilots/2026-10-29-cache-price/declaration.json').read_bytes())
+    declaration = json.loads((SCRIPT.parents[2]/'eval/ai-gateway/paired-pilots/2026-10-29-cache-price/declaration.json').read_bytes())
     scope['width'] = 28
     # The compact score fixture retains its four recorded arms and full schedule.
     for window, cap in zip(scope['windows'], declaration['caps']): window.update(cap)

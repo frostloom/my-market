@@ -12,7 +12,7 @@ import (
 // Storage-only; permission rejection is tested separately.
 func TestRechargeEntryClaimPermanentAndIndependent(t *testing.T) {
 	root := t.TempDir()
-	p := syntheticRetestPilotAt(t, "../../eval/paired-pilots/2026-10-23-recharge-confirm-entry", strings.Repeat("a", 40), false)
+	p := syntheticRetestPilotAt(t, "../../../../eval/ai-gateway/paired-pilots/2026-10-23-recharge-confirm-entry", strings.Repeat("a", 40), false)
 	if err := persistRetestClaim(root, p.CampaignID(), p.ExecutionRevision(), "first"); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestRechargeEntryClaimPermanentAndIndependent(t *testing.T) {
 	if m["budget_ceiling_sha256"] != "4669a31fe6f74f7f6901ed9a4dcb114016d7ed4aac85be949d9b0b6e74c0c00b" || m["reserved_model_micro_cny"] != float64(337920) || m["reserved_jev_micro_usd"] != float64(2688) {
 		t.Fatal("claim lost permanent cumulative reservation", m)
 	}
-	changed := syntheticRetestPilotAt(t, "../../eval/paired-pilots/2026-10-23-recharge-confirm-entry", strings.Repeat("b", 40), true)
+	changed := syntheticRetestPilotAt(t, "../../../../eval/ai-gateway/paired-pilots/2026-10-23-recharge-confirm-entry", strings.Repeat("b", 40), true)
 	if persistRetestClaim(root, changed.CampaignID(), changed.ExecutionRevision(), "second") == nil {
 		t.Fatal("changed version/output reset claim")
 	}
@@ -42,7 +42,7 @@ func TestRechargeEntryClaimPermanentAndIndependent(t *testing.T) {
 
 func TestRechargeEntryUnreadyStopsBeforeSecretsOrOutput(t *testing.T) {
 	root := t.TempDir()
-	base := "../../eval/paired-pilots/2026-10-23-recharge-confirm-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-recharge-confirm-entry"
 	outpath := filepath.Join(root, "no-output")
 	args := []string{"-retest", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(root, "missing-secret"), "-out", outpath}
 	var out bytes.Buffer

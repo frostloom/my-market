@@ -29,7 +29,7 @@ try {
     if ($Workers -lt 1 -or $Sample -lt 0) { throw 'Invalid sample/workers.' }
     if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { throw "Experiment port $Port is already occupied." }
     $agentPath = (Resolve-Path -LiteralPath $AgentExe).Path
-    if (!$Out) { $Out = "eval/reports/$Version-$JevMode-" + (Get-Date -Format 'yyyyMMdd-HHmmss') }
+    if (!$Out) { $Out = "../../eval/ai-gateway/reports/$Version-$JevMode-" + (Get-Date -Format 'yyyyMMdd-HHmmss') }
     if (Test-Path -LiteralPath $Out) { throw "Output already exists: $Out. Use a fresh directory." }
     New-Item -ItemType Directory -Path $Out | Out-Null
     $outputPath = (Resolve-Path -LiteralPath $Out).Path

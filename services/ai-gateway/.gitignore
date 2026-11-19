@@ -20,8 +20,7 @@ web/.npm-cache/
 # 测试产物
 coverage.out
 __pycache__/
-# Companion raw JSON remains local; byte-identical gzip and SHA manifests are tracked.
-eval/behavior-review/v*/*.behavior.json
+# eval/ 资产于 R2.6-T2 迁至仓库顶层 eval/ai-gateway/，其忽略规则移交根 .gitignore
 
 # 本地构建缓存（go build cache，数百 MB，可重建）
 .gocache/
@@ -37,9 +36,6 @@ err.txt
 # 设计预览与截图（web/src 才是前端源，这些是本地生成的对照稿）
 web/preview/
 .dsh-vision-toolkit/
-
-# 评测报告（由 go run ./cmd/eval 重新生成，见 eval/README.md）
-eval/reports/
 
 # 公开数据集调研的原始下载（web/scripts/survey-datasets.mjs 可重新拉取，几十 MB）
 web/.probe/
@@ -59,6 +55,3 @@ deploy/langfuse/.local-login.txt
 
 # 设计工具本地产物（截图/对照稿）
 .hallmark/
-
-# 2026-11 线下压测原始运行数据（结论在 docs，原始目录只留本地）
-/eval/project-load-2026-11-02/

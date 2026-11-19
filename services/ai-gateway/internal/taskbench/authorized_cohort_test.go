@@ -10,7 +10,7 @@ import (
 
 func cohortInputs(t *testing.T) ([]byte, []byte, []byte, []byte) {
 	t.Helper()
-	base := "../../eval/paired-pilots/2026-10-24-v5-six-cohort-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-six-cohort-entry"
 	read := func(n string) []byte {
 		b, e := os.ReadFile(filepath.Join(base, n))
 		if e != nil {
@@ -31,7 +31,7 @@ func TestCohortFixedScopeBindings(t *testing.T) {
 	if err != nil || !pilot.Ready() || !pilot.IsCohort() || !pilot.HumanAuthorized() || pilot.CampaignID() != "v5-six-case-cohort-20261024" {
 		t.Fatalf("cohort not ready: %v %v", err, pilot.Blockers())
 	}
-	if err = pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
+	if err = pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"schema", "campaign_id", "scope_plan_sha256", "customer_source_revision", "runtime_contract_sha256", "budget_ceiling_sha256", "prior_offline_manifest_sha256", "prior_offline_acceptance_sha256", "diagnostic_source_revision", "diagnostic_manifest_sha256", "execution_revision", "case_key", "prior_journal_sha256", "prior_review_sha256"} {

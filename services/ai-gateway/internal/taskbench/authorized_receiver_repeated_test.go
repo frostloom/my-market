@@ -10,7 +10,7 @@ import (
 
 func receiverInputs(t *testing.T) (a, p, b, e []byte) {
 	t.Helper()
-	base := "../../eval/paired-pilots/2026-10-27-receiver-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-27-receiver-repeated-entry"
 	read := func(f string) []byte {
 		raw, err := os.ReadFile(filepath.Join(base, f))
 		if err != nil {
@@ -33,7 +33,7 @@ func TestReceiverRepeatedScopeBindings(t *testing.T) {
 	if err != nil || !pilot.Ready() || !pilot.IsReceiverRepeated() || pilot.IsRepeatedDiagnostic() {
 		t.Fatal("new isolated scope", err, pilot.Blockers())
 	}
-	if err = pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
+	if err = pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
 		t.Fatal(err)
 	}
 	no, err := CheckAuthorizedReceiverRepeated(alteredJSON(a, "human_authorized", false), p, b, e)
@@ -68,7 +68,7 @@ func TestReceiverRepeatedScopeBindings(t *testing.T) {
 }
 func TestReceiverRepeatedBindingArchiveHashes(t *testing.T) {
 	b := v5ReceiverRepeatedBinding()
-	for file, want := range map[string]string{"../../eval/paired-pilots/2026-10-27-receiver-deployment/manifest.json": b.ReceiverDeploymentManifestSHA, "../../eval/paired-pilots/2026-10-26-otel-receiver-adapter/manifest.json": b.ReceiverAdapterManifestSHA, "../../eval/paired-pilots/2026-10-26-repeated-diagnostic-live-result/manifest.json": b.PriorReceiverDiagnosticResultManifestSHA} {
+	for file, want := range map[string]string{"../../../../eval/ai-gateway/paired-pilots/2026-10-27-receiver-deployment/manifest.json": b.ReceiverDeploymentManifestSHA, "../../../../eval/ai-gateway/paired-pilots/2026-10-26-otel-receiver-adapter/manifest.json": b.ReceiverAdapterManifestSHA, "../../../../eval/ai-gateway/paired-pilots/2026-10-26-repeated-diagnostic-live-result/manifest.json": b.PriorReceiverDiagnosticResultManifestSHA} {
 		raw, err := os.ReadFile(file)
 		if err != nil || conversationHash(raw) != want {
 			t.Fatal("receiver evidence binding changed", file, err)

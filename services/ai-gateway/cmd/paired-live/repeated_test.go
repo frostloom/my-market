@@ -14,7 +14,7 @@ import (
 
 // New fixed-scope permission and storage are both required.
 func TestRepeatedClaimPredecessorsAndPermanentBudget(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-v5-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-repeated-entry"
 	p := syntheticRepeatedPilotAt(t, base, strings.Repeat("a", 40), false)
 	parents := []struct{ id, file string }{{"recharge-confirm-20261023", "prior-confirm-claim.json"}, {"recharge-confirm-diagnostic-retest-20261023", "prior-diagnostic-claim.json"}, {"recharge-cancel-20261024", "prior-cancel-claim.json"}, {"recharge-supplement-20261024", "prior-supplement-claim.json"}, {"refund-cap-20261024", "prior-refund-claim.json"}, {"v5-six-case-cohort-20261024", "prior-cohort-claim.json"}}
 	for _, broken := range []int{0, 1, 2, 3, 4, 5} {
@@ -98,7 +98,7 @@ func TestRepeatedClaimPredecessorsAndPermanentBudget(t *testing.T) {
 }
 
 func TestRepeatedUnreadyDoesNotReadSecrets(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-v5-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-repeated-entry"
 	root := t.TempDir()
 	output := filepath.Join(root, "absent")
 	args := []string{"-repeated", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(root, "missing-secret"), "-out", output}
@@ -158,7 +158,7 @@ func syntheticRepeatedPilotAt(t *testing.T, base, rev string, reformat bool) tas
 }
 
 func TestRepeatedFlagIsolation(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-v5-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-repeated-entry"
 	args := []string{"-repeated", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json")}
 	for _, extra := range [][]string{{"-cohort"}, {"-retest"}, {"-continue-from", "unused"}, {"-review", "unused"}, {"-continuation-authorization", "unused"}} {
 		var out bytes.Buffer

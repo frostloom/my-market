@@ -49,7 +49,7 @@ func collectionAuditFixture(t *testing.T) CollectionJournalReference {
 }
 func TestCollectionAuditFrozenSourceAndSafeNegative(t *testing.T) {
 	ref := collectionAuditFixture(t)
-	report, err := AuditFullCollectionPolicy("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", []CollectionJournalReference{ref})
+	report, err := AuditFullCollectionPolicy("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", []CollectionJournalReference{ref})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCollectionAuditFrozenSourceAndSafeNegative(t *testing.T) {
 func TestCollectionAuditRejectsMissingChangedOrDuplicateJournal(t *testing.T) {
 	ref := collectionAuditFixture(t)
 	for _, refs := range [][]CollectionJournalReference{nil, {ref, ref}, {{Path: ref.Path, SHA256: strings.Repeat("f", 64)}}, {{Path: ref.Path + "-missing", SHA256: ref.SHA256}}} {
-		if _, err := AuditFullCollectionPolicy("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", refs); err == nil {
+		if _, err := AuditFullCollectionPolicy("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", refs); err == nil {
 			t.Fatal("invalid journal accepted")
 		}
 	}
@@ -134,7 +134,7 @@ func TestCollectionAuditRejectsContradictoryRuntime(t *testing.T) {
 			}
 			path := filepath.Join(t.TempDir(), "changed.jsonl")
 			os.WriteFile(path, output.Bytes(), 0600)
-			_, err := AuditFullCollectionPolicy("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", []CollectionJournalReference{{Path: path, SHA256: conversationHash(output.Bytes())}})
+			_, err := AuditFullCollectionPolicy("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", []CollectionJournalReference{{Path: path, SHA256: conversationHash(output.Bytes())}})
 			if err == nil {
 				t.Fatal("contradictory runtime accepted", fault)
 			}

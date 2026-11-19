@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	CampaignDir    = "eval/campaigns/2026-11-10-local-paired"
+	CampaignDir    = "../../eval/ai-gateway/campaigns/2026-11-10-local-paired"
 	CustomerModel  = "gpt-6-luna"
 	bundleFileMode = 0o644
 	bundleDirMode  = 0o755

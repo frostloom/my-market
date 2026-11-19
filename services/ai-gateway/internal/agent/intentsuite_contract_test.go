@@ -10,7 +10,7 @@ import (
 )
 
 func TestContractIntentSuiteLoadsFrozen1220(t *testing.T) {
-	path := filepath.Join("..", "..", "eval", "contracts", "2026-10-09-customer-service-v1", "cases.json")
+	path := filepath.Join("..", "..", "..", "..", "eval", "ai-gateway", "contracts", "2026-10-09-customer-service-v1", "cases.json")
 	normal, adv, digest, err := LoadContractIntentSuite(path)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestContractIntentSuiteLoadsFrozen1220(t *testing.T) {
 	}
 }
 func TestContractIntentSuiteRejectsInvalidEvidence(t *testing.T) {
-	path := filepath.Join("..", "..", "eval", "contracts", "2026-10-09-customer-service-v1", "cases.json")
+	path := filepath.Join("..", "..", "..", "..", "eval", "ai-gateway", "contracts", "2026-10-09-customer-service-v1", "cases.json")
 	raw, _ := os.ReadFile(path)
 	var all []map[string]any
 	json.Unmarshal(raw, &all)

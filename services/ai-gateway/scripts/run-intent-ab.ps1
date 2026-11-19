@@ -7,7 +7,7 @@ param(
     [int]$Workers = 4,
     [int]$BaselinePort = 19105,
     [int]$ExperimentPort = 19106,
-    [string]$Out = ('eval/reports/ab-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [string]$Out = ('../../eval/ai-gateway/reports/ab-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 )
 $ErrorActionPreference = 'Stop'
 $rootPath = Split-Path -Parent $PSScriptRoot

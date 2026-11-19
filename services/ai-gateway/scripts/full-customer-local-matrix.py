@@ -7,7 +7,8 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-IDENTITY = Path('eval/paired-pilots/2026-10-27-full1220-adapter/selection-identity.json')
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+IDENTITY = EVAL / 'paired-pilots/2026-10-27-full1220-adapter/selection-identity.json'
 RUNTIME_SHA = {'prompt_sha256':'731344ccef1bfc40456b6797e9c7cb5c5c3d628799d3e5ee8ab05f3142c6f7fa',
                'tool_schema_sha256':'3962937d7fd08af4794758a56070b7bbadfb5c3e188cf1fa539355780b9e0e17'}
 

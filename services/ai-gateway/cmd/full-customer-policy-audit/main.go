@@ -17,8 +17,8 @@ func run(args []string) int {
 	f.SetOutput(io.Discard)
 	refsPath := f.String("journals", "", "explicit JSON array of journal path/SHA references")
 	out := f.String("out", "", "new read-only audit result path")
-	definitions := f.String("definitions", "eval/task-definitions/2026-10-12-full-dev-v1", "frozen definitions")
-	profiles := f.String("profiles", "eval/runtime-profiles/2026-10-13-six-profiles-v1", "frozen profiles")
+	definitions := f.String("definitions", "../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "frozen definitions")
+	profiles := f.String("profiles", "../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", "frozen profiles")
 	if f.Parse(args) != nil || f.NArg() != 0 || *refsPath == "" || *out == "" {
 		return 2
 	}

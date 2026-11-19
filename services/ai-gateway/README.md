@@ -171,6 +171,8 @@ agent 设置 `AGENT_KNOWLEDGE_ENABLED=1`，并用 `AGENT_KNOWLEDGE_DIR=knowledge
 
 ### P2 AI 客服评测集（数据驱动回归）
 
+> 评测资产自 R2.6-T2 起位于仓库顶层 `eval/ai-gateway/`（定位规约见 `eval/README.md`）；下文 `eval/...` 路径均指该目录。
+
 - `eval/cases/*.json`：**35 条用例 × 6 维度**（意图/确认流程/安全注入/输出纯净/订阅额度），
   每条 = 脚本化假 LLM + 多轮用户输入 + 断言集合（工具路由、确认状态机、
   tenant 覆写、admin 写调用、回复纯净度、拦截原因）。

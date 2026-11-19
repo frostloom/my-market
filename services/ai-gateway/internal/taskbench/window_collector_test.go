@@ -87,7 +87,7 @@ func testWindowCollectorAuthorizationVersion(t *testing.T, policy string, v2 boo
 	}
 	t.Cleanup(func() { observer.Shutdown(context.Background()) })
 	model, judge := new(int), new(int)
-	auth := &windowAcquisitionAuthorization{campaign: campaign, source: source, frozenScopeSHA: scopeSHA, frozenExecutionSHA: execution, actualExecutionSHA: execution, observer: observer, observerIdentity: observer.EvaluationIdentity(), modelKey: "synthetic-model-key", jevKey: "synthetic-jev-key", modelUpstream: testWindowCollectorModel(model), jevUpstream: testWindowCollectorJEV(judge), fixtureOptions: PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"}, privateReportRoot: filepath.Join(parent, "records"), evidenceKind: "local_stub"}
+	auth := &windowAcquisitionAuthorization{campaign: campaign, source: source, frozenScopeSHA: scopeSHA, frozenExecutionSHA: execution, actualExecutionSHA: execution, observer: observer, observerIdentity: observer.EvaluationIdentity(), modelKey: "synthetic-model-key", jevKey: "synthetic-jev-key", modelUpstream: testWindowCollectorModel(model), jevUpstream: testWindowCollectorJEV(judge), fixtureOptions: PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"}, privateReportRoot: filepath.Join(parent, "records"), evidenceKind: "local_stub"}
 	return auth, model, judge
 }
 func testWindowCollectorModel(calls *int) http.RoundTripper {

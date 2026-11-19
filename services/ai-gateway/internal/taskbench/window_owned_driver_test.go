@@ -107,7 +107,7 @@ func fixtureWindowOwnedPermit(t *testing.T, policy ...string) (*windowAcquisitio
 	if e != nil {
 		t.Fatal(e)
 	}
-	env, e := OpenPairedFixtureEnvironment(context.Background(), PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"})
+	env, e := OpenPairedFixtureEnvironment(context.Background(), PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"})
 	if e != nil {
 		t.Fatal(e)
 	}

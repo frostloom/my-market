@@ -7,8 +7,10 @@ import re
 import shutil
 from pathlib import Path
 
-SOURCE = Path('eval/intent-suite')
-OUT = Path('eval/annotations/2026-10-09-intent-contract-v1')
+ROOT = Path(__file__).resolve().parents[1]
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+SOURCE = EVAL / 'intent-suite'
+OUT = EVAL / 'annotations/2026-10-09-intent-contract-v1'
 WRITE = {'recharge', 'refund_recharge', 'subscribe_plan', 'change_plan', 'cancel_subscription'}
 READ = {'get_balance', 'get_consumption', 'get_recent_bills', 'list_models', 'list_plans', 'get_my_subscription'}
 LABELS = {'read': '查询并回答', 'clarify': '必要追问', 'consult': '咨询解释', 'preview': '复核后预览', 'respond': '非业务回应', 'reject': '拒绝违规部分', 'limited': '查询并说明能力边界'}

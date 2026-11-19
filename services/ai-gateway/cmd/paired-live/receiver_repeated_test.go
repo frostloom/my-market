@@ -15,7 +15,7 @@ import (
 // Missing mode dispatch must not turn a harmless false-consent check into an error
 // or read its deliberately absent credentials/output.
 func TestReceiverRepeatedFalseCheckDoesNotReadCredentials(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-27-receiver-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-27-receiver-repeated-entry"
 	dir := t.TempDir()
 	output := filepath.Join(dir, "uncreated")
 	args := []string{"-receiver-repeated", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(dir, "missing-env"), "-out", output}
@@ -33,7 +33,7 @@ func TestReceiverRepeatedFalseCheckDoesNotReadCredentials(t *testing.T) {
 }
 
 func TestReceiverRepeatedClaimChain(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-27-receiver-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-27-receiver-repeated-entry"
 	p := syntheticReceiverPilotAt(t, base, strings.Repeat("a", 40), false)
 	parents := []struct{ id, file string }{{"recharge-confirm-20261023", "prior-confirm-claim.json"}, {"recharge-confirm-diagnostic-retest-20261023", "prior-diagnostic-claim.json"}, {"recharge-cancel-20261024", "prior-cancel-claim.json"}, {"recharge-supplement-20261024", "prior-supplement-claim.json"}, {"refund-cap-20261024", "prior-refund-claim.json"}, {"v5-six-case-cohort-20261024", "prior-cohort-claim.json"}, {"v5-repeated-cohort-20261024", "prior-repeated-claim.json"}, {"v5-repeated-export-diagnostic-20261025", "prior-export-diagnostic-claim.json"}}
 	for _, broken := range []int{0, 1, 2, 3, 4, 5, 6, 7} {
@@ -160,7 +160,7 @@ func syntheticReceiverPilotAt(t *testing.T, base, rev string, reformat bool) tas
 }
 
 func TestReceiverRepeatedRejectsOtherModes(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-27-receiver-repeated-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-27-receiver-repeated-entry"
 	args := []string{"-receiver-repeated", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json")}
 	for _, extra := range [][]string{{"-repeated-diagnostic"}, {"-repeated"}, {"-cohort"}, {"-retest"}, {"-continue-from", "unused"}, {"-review", "unused"}, {"-continuation-authorization", "unused"}} {
 		var out bytes.Buffer

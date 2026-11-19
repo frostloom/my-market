@@ -17,7 +17,7 @@ func TestCLIRejectsOnlineOptions(t *testing.T) {
 }
 
 func TestCLIDiagnosticFailureCannotExitSuccessfully(t *testing.T) {
-	const archive = "../../eval/task-definitions/2026-10-12-full-dev-v1"
+	const archive = "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1"
 	suite, err := taskbench.LoadConversations(archive)
 	if err != nil {
 		t.Fatal(err)

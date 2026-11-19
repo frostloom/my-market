@@ -11,7 +11,7 @@ import (
 
 func recoveryRetestInputs(t *testing.T) ([]byte, []byte, []byte, []byte) {
 	t.Helper()
-	base := "../../eval/paired-pilots/2026-10-23-cash-read-recovery-retest-offline"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-recovery-retest-offline"
 	read := func(name string) []byte {
 		raw, err := os.ReadFile(filepath.Join(base, name))
 		if err != nil {
@@ -85,7 +85,7 @@ func TestRecoveryRetestReferencesActualFailedEvidence(t *testing.T) {
 	if json.Unmarshal(a, &auth) != nil {
 		t.Fatal("auth")
 	}
-	raw, err := os.ReadFile("../../eval/paired-pilots/2026-10-23-cash-read-retest-live-result/independent-review.json")
+	raw, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-retest-live-result/independent-review.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestHistoricalRecoveryScopeRemainsReadableButCannotExecute(t *testing.T) {
 	if err != nil || pilot.Ready() || !pilot.HumanAuthorized() || !hasString(pilot.Blockers(), "runtime_contract_mismatch") {
 		t.Fatalf("historical scope unreadable or executable: blockers=%v err=%v", pilot.Blockers(), err)
 	}
-	if pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)) == nil {
+	if pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)) == nil {
 		t.Fatal("old contract frozen execution validated")
 	}
 	dir := filepath.Join(t.TempDir(), "must-not-exist")

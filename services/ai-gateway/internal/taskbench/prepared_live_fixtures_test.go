@@ -71,7 +71,7 @@ func TestPreparedDefinitionsInstantiateIsolatedLiveAccounts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, err := os.ReadFile("../../eval/task-suites/2026-10-11-read-fixtures-dev-v1/cases.json")
+	raw, err := os.ReadFile("../../../../eval/ai-gateway/task-suites/2026-10-11-read-fixtures-dev-v1/cases.json")
 	if err != nil {
 		t.Fatal(err)
 	}

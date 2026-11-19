@@ -8,7 +8,7 @@ import (
 )
 
 func TestPiCampaignCLIRejectsMismatchedFlagsBeforeWriting(t *testing.T) {
-	raw, err := os.ReadFile("../../eval/paired-pilots/2026-10-22-campaign-preflight/plan.json")
+	raw, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-22-campaign-preflight/plan.json")
 	if err != nil {
 		t.Fatal(err)
 	}

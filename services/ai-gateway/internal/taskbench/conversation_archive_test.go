@@ -9,7 +9,7 @@ import (
 )
 
 func TestConversationArchivedStoreEvidenceReplay(t *testing.T) {
-	const base = "../../eval/conversation-regressions/2026-10-13-local-v1"
+	const base = "../../../../eval/ai-gateway/conversation-regressions/2026-10-13-local-v1"
 	raw, err := os.ReadFile(filepath.Join(base, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestConversationArchivedStoreEvidenceReplay(t *testing.T) {
 			t.Fatalf("local evidence changed: %s", name)
 		}
 	}
-	suite, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	suite, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

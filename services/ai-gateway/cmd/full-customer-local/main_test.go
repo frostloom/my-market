@@ -20,7 +20,7 @@ func TestLocalCLIRejectsBeforeFixture(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "run")
 	keys := filepath.Join(t.TempDir(), "keys.json")
 	os.WriteFile(keys, []byte(`["models-001/first_turn"]`), 0600)
-	args := []string{"-execute-local", "-mysql-dsn", "root:SECRET@tcp(127.0.0.1:1)/", "-keys", keys, "-revision", strings.Repeat("a", 40), "-out", dir, "-definitions", "../../eval/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"}
+	args := []string{"-execute-local", "-mysql-dsn", "root:SECRET@tcp(127.0.0.1:1)/", "-keys", keys, "-revision", strings.Repeat("a", 40), "-out", dir, "-definitions", "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"}
 	if run(args) != 2 {
 		t.Fatal("selection should reject before connection")
 	}

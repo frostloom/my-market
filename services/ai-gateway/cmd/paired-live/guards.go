@@ -65,11 +65,15 @@ func repositoryRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	module, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil || !strings.Contains(string(module), "module github.com/frostloom/ai-gateway\n") {
-		return "", fmt.Errorf("wrong repository")
+	// R2.6 起为 monorepo：ai-gateway 模块声明可位于仓库根（R2.6 前布局）
+	// 或 services/ai-gateway/（现布局）；仓库根本身必须是 git toplevel。
+	for _, mod := range []string{filepath.Join(root, "go.mod"), filepath.Join(root, "services", "ai-gateway", "go.mod")} {
+		module, err := os.ReadFile(mod)
+		if err == nil && strings.Contains(string(module), "module github.com/frostloom/ai-gateway\n") {
+			return root, nil
+		}
 	}
-	return root, nil
+	return "", fmt.Errorf("wrong repository")
 }
 
 func executingBuildRevision() (string, bool) {
@@ -116,7 +120,8 @@ func verifyExecutionRevisionWithArchive(root, requested, built string, modified 
 	if archiveBuild {
 		// Disk source is not compiled by an archive build. Only the runtime
 		// frozen inputs must match HEAD, including ignored untracked files.
-		queries = [][]string{{"diff", "--name-only", "-z", "HEAD", "--", "eval/task-definitions", "eval/runtime-profiles"}, {"ls-files", "--others", "-z", "--", "eval/task-definitions", "eval/runtime-profiles"}}
+		// Pathspecs are relative to the git toplevel; eval 资产在仓库顶层 eval/ai-gateway。
+		queries = [][]string{{"diff", "--name-only", "-z", "HEAD", "--", "eval/ai-gateway/task-definitions", "eval/ai-gateway/runtime-profiles"}, {"ls-files", "--others", "-z", "--", "eval/ai-gateway/task-definitions", "eval/ai-gateway/runtime-profiles"}}
 	}
 	for _, args := range queries {
 		cmd := append([]string{"-C", root}, args...)
@@ -125,7 +130,8 @@ func verifyExecutionRevisionWithArchive(root, requested, built string, modified 
 			return fmt.Errorf("source state unavailable")
 		}
 		for _, path := range strings.Split(string(raw), "\x00") {
-			if path != "" && (archiveBuild || strings.HasSuffix(path, ".go") || path == "go.mod" || path == "go.sum" || path == "go.work" || path == "go.work.sum" || strings.HasPrefix(path, "eval/task-definitions/") || strings.HasPrefix(path, "eval/runtime-profiles/")) {
+			// R2.6 起 ai-gateway 模块位于 services/ai-gateway/：模块级 go.mod/go.sum 也纳入冻结审查。
+			if path != "" && (archiveBuild || strings.HasSuffix(path, ".go") || path == "go.mod" || path == "go.sum" || path == "go.work" || path == "go.work.sum" || path == "services/ai-gateway/go.mod" || path == "services/ai-gateway/go.sum" || strings.HasPrefix(path, "eval/ai-gateway/task-definitions/") || strings.HasPrefix(path, "eval/ai-gateway/runtime-profiles/")) {
 				return fmt.Errorf("runtime source or frozen inputs differ from reviewed revision")
 			}
 		}

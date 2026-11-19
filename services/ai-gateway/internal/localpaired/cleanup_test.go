@@ -8,12 +8,24 @@ import (
 	"testing"
 )
 
+// prepareEvalAssetLayout 建立与真实仓库同构的布局：root 对应仓库根，workdir 对应
+// services/ai-gateway（工具 cwd），评测资产在 root/eval/ai-gateway（对 workdir 为 ../../eval/ai-gateway）。
+func prepareEvalAssetLayout(t *testing.T) (root, work string) {
+	t.Helper()
+	root = t.TempDir()
+	work = filepath.Join(root, "services", "ai-gateway")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root, work
+}
+
 func TestCleanRejectsProtectedRoots(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
+	root, work := prepareEvalAssetLayout(t)
+	t.Chdir(work)
 
 	ledger := filepath.Join(root, "billing", "ledger")
-	frozen := filepath.Join(root, "eval", "task-definitions", "2026-10-12-full-dev-v1")
+	frozen := filepath.Join(root, "eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1")
 	langfuse := filepath.Join(root, "deploy", "langfuse")
 	allowed := filepath.Join(root, "old-output")
 	nested := filepath.Join(allowed, "nested")
@@ -32,7 +44,7 @@ func TestCleanRejectsProtectedRoots(t *testing.T) {
 	}
 	assertKept(t, nested)
 
-	bank := filepath.Join("eval", "campaigns", "2026-11-10-local-paired", "cases.json")
+	bank := filepath.Join(root, "eval", "ai-gateway", "campaigns", "2026-11-10-local-paired", "cases.json")
 	if err := os.MkdirAll(filepath.Dir(bank), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +90,31 @@ func assertKept(t *testing.T, dir string) {
 }
 
 func TestCleanRejectsProtectedVariants(t *testing.T) {
+	root, work := prepareEvalAssetLayout(t)
+	t.Chdir(work)
+	write := func(path, content string) {
+		t.Helper()
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join("billing", "ledger", "keep.txt"), "keep")
+	write(filepath.Join("eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1", "keep.txt"), "keep")
+	write(filepath.Join("deploy", "langfuse", "keep.txt"), "keep")
+	write(filepath.Join("old-output", "keep.txt"), "keep")
+	bank := filepath.Join(root, "eval", "ai-gateway", "campaigns", "2026-11-10-local-paired", "cases.json")
+	if err := os.MkdirAll(filepath.Dir(bank), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const cases = "local-read-history-001\nlocal-offtopic-history-001\nlocal-read-pending-001\nlocal-offtopic-pending-001\n"
+	if err := os.WriteFile(bank, []byte(cases), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	variants := []struct {
 		name   string
 		allow  string
@@ -85,21 +122,20 @@ func TestCleanRejectsProtectedVariants(t *testing.T) {
 	}{
 		{name: "dotdot cleans away langfuse", target: "deploy/langfuse/.."},
 		{name: "allow list cleans to langfuse parent", allow: "deploy", target: "deploy/langfuse/.."},
-		{name: "dotdot cleans away frozen definitions", target: "eval/task-definitions/2026-10-12-full-dev-v1/.."},
+		{name: "dotdot cleans away frozen definitions", target: "eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1/.."},
 		{name: "dotdot cleans to current directory", target: "deploy/langfuse/../.."},
 		{name: "dotdot cleans allowlisted output to dot", target: "old-output/.."},
 		{name: "dotdot returns to allowlisted output", target: "old-output/../old-output"},
 		{name: "parent of langfuse", target: "deploy"},
-		{name: "parent of frozen definitions", target: "eval/task-definitions"},
+		{name: "parent of frozen definitions", target: "eval/ai-gateway/task-definitions"},
 		{name: "ancestor of frozen definitions", target: "eval"},
 		{name: "langfuse case variant", target: "deploy/Langfuse"},
-		{name: "frozen definitions case variant", target: "Eval/Task-Definitions/2026-10-12-full-dev-v1"},
+		{name: "frozen definitions case variant", target: "Eval/AI-Gateway/Task-Definitions/2026-10-12-full-dev-v1"},
 		{name: "billing ledger case variant", target: "Billing/Ledger"},
 	}
 	for _, variant := range variants {
 		t.Run(variant.name, func(t *testing.T) {
-			prepareCleanRoot(t)
-			before := keepFiles(t)
+			before := keepFiles(t, root)
 			allow := variant.allow
 			if allow == "" {
 				allow = variant.target
@@ -108,7 +144,7 @@ func TestCleanRejectsProtectedVariants(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "protected") {
 				t.Fatalf("err = %v, want a protected-path refusal", err)
 			}
-			after := keepFiles(t)
+			after := keepFiles(t, root)
 			if !reflect.DeepEqual(before, after) {
 				t.Fatalf("keep files = %v, want %v", after, before)
 			}
@@ -116,37 +152,10 @@ func TestCleanRejectsProtectedVariants(t *testing.T) {
 	}
 }
 
-func prepareCleanRoot(t *testing.T) {
-	t.Helper()
-	root := t.TempDir()
-	t.Chdir(root)
-	for _, dir := range []string{
-		filepath.Join("billing", "ledger"),
-		filepath.Join("eval", "task-definitions", "2026-10-12-full-dev-v1"),
-		filepath.Join("deploy", "langfuse"),
-		"old-output",
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	bank := filepath.Join("eval", "campaigns", "2026-11-10-local-paired", "cases.json")
-	if err := os.MkdirAll(filepath.Dir(bank), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	const cases = "local-read-history-001\nlocal-offtopic-history-001\nlocal-read-pending-001\nlocal-offtopic-pending-001\n"
-	if err := os.WriteFile(bank, []byte(cases), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func keepFiles(t *testing.T) map[string]string {
+func keepFiles(t *testing.T, root string) map[string]string {
 	t.Helper()
 	got := map[string]string{}
-	err := filepath.WalkDir(".", func(path string, entry os.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -157,7 +166,11 @@ func keepFiles(t *testing.T) map[string]string {
 		if err != nil {
 			return err
 		}
-		got[filepath.ToSlash(path)] = string(raw)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		got[filepath.ToSlash(rel)] = string(raw)
 		return nil
 	})
 	if err != nil {
@@ -167,37 +180,73 @@ func keepFiles(t *testing.T) map[string]string {
 }
 
 func TestCleanRejectsAbsoluteWorkdirAndRoot(t *testing.T) {
-	prepareCleanRoot(t)
-	cwd, err := os.Getwd()
-	if err != nil {
+	root, work := prepareEvalAssetLayout(t)
+	t.Chdir(work)
+	for _, dir := range []string{
+		filepath.Join(root, "billing", "ledger"),
+		filepath.Join(root, "eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1"),
+		filepath.Join(root, "deploy", "langfuse"),
+		filepath.Join(root, "old-output"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bank := filepath.Join(root, "eval", "ai-gateway", "campaigns", "2026-11-10-local-paired", "cases.json")
+	if err := os.MkdirAll(filepath.Dir(bank), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const cases = "local-read-history-001\nlocal-offtopic-history-001\nlocal-read-pending-001\nlocal-offtopic-pending-001\n"
+	if err := os.WriteFile(bank, []byte(cases), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	targets := []string{
-		cwd,
+		work,
 		string(filepath.Separator),
-		filepath.Join(cwd, "deploy"),
-		filepath.Join(cwd, "eval"),
-		filepath.Join(cwd, "billing", "ledger"),
-		filepath.Join(cwd, "deploy", "Langfuse"),
-		filepath.Join(cwd, "eval", "task-definitions", "2026-10-12-full-dev-v1"),
+		filepath.Join(work, "deploy"),
+		filepath.Join(work, "eval"),
+		filepath.Join(work, "billing", "ledger"),
+		filepath.Join(work, "deploy", "Langfuse"),
+		filepath.Join(root, "eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1"),
 	}
-	before := keepFiles(t)
+	before := keepFiles(t, root)
 	for _, target := range targets {
 		err := Clean([]string{target}, target)
 		if err == nil || !strings.Contains(err.Error(), "protected") {
 			t.Fatalf("Clean(%q) err = %v, want a protected-path refusal", target, err)
 		}
 	}
-	after := keepFiles(t)
+	after := keepFiles(t, root)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("keep files = %v, want %v", after, before)
 	}
 }
 
 func TestCleanAllowsUnrelatedDeployAndEval(t *testing.T) {
-	prepareCleanRoot(t)
-	cwd, err := os.Getwd()
-	if err != nil {
+	root, work := prepareEvalAssetLayout(t)
+	t.Chdir(work)
+	for _, dir := range []string{
+		filepath.Join(root, "billing", "ledger"),
+		filepath.Join(root, "eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1"),
+		filepath.Join(root, "deploy", "langfuse"),
+		filepath.Join(root, "old-output"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bank := filepath.Join(root, "eval", "ai-gateway", "campaigns", "2026-11-10-local-paired", "cases.json")
+	if err := os.MkdirAll(filepath.Dir(bank), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const cases = "local-read-history-001\nlocal-offtopic-history-001\nlocal-read-pending-001\nlocal-offtopic-pending-001\n"
+	if err := os.WriteFile(bank, []byte(cases), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	targets := []string{
@@ -213,7 +262,7 @@ func TestCleanAllowsUnrelatedDeployAndEval(t *testing.T) {
 		}
 	}
 	for _, dir := range targets {
-		abs := filepath.Join(cwd, dir)
+		abs := filepath.Join(work, dir)
 		if err := Clean([]string{abs}, abs); err != nil {
 			t.Fatalf("Clean(%q) = %v, want removal of an unrelated directory", abs, err)
 		}
@@ -222,10 +271,10 @@ func TestCleanAllowsUnrelatedDeployAndEval(t *testing.T) {
 		}
 	}
 	for _, dir := range []string{
-		filepath.Join("billing", "ledger"),
-		filepath.Join("eval", "task-definitions", "2026-10-12-full-dev-v1"),
-		filepath.Join("deploy", "langfuse"),
-		"old-output",
+		filepath.Join(root, "billing", "ledger"),
+		filepath.Join(root, "eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1"),
+		filepath.Join(root, "deploy", "langfuse"),
+		filepath.Join(root, "old-output"),
 	} {
 		assertKept(t, dir)
 	}

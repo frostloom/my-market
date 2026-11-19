@@ -14,7 +14,7 @@ import (
 
 func diagnosticInputs(t *testing.T) (a, p, b, e []byte) {
 	t.Helper()
-	base := "../../eval/paired-pilots/2026-10-26-repeated-diagnostic-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-26-repeated-diagnostic-entry"
 	read := func(name string) []byte {
 		t.Helper()
 		raw, err := os.ReadFile(filepath.Join(base, name))
@@ -38,7 +38,7 @@ func TestRepeatedDiagnosticScopeIsSeparate(t *testing.T) {
 	if err != nil || !pilot.Ready() || !pilot.IsRepeated() || !pilot.IsRepeatedDiagnostic() || pilot.CampaignID() != "v5-repeated-export-diagnostic-20261025" {
 		t.Fatalf("new scope: %v %v", err, pilot.Blockers())
 	}
-	if err = pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
+	if err = pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err != nil {
 		t.Fatal(err)
 	}
 	no, err := CheckAuthorizedRepeatedDiagnostic(alteredJSON(a, "human_authorized", false), p, b, e)
@@ -139,7 +139,7 @@ func TestRepeatedDiagnosticBindingUsesCommittedArchiveBytes(t *testing.T) {
 	var binding map[string]string
 	json.Unmarshal(raw, &binding)
 	for key, path := range map[string]string{"observer_source_sha256": "2026-10-25-observer-export-diagnostics/source-sha256.json", "synthetic_provenance_sha256": "2026-10-25-observer-synthetic-delivery/verification-provenance.json", "prior_result_manifest_sha256": "2026-10-24-v5-repeated-live-result/manifest.json"} {
-		source, err := os.ReadFile(filepath.Join("../../eval/paired-pilots", path))
+		source, err := os.ReadFile(filepath.Join("../../../../eval/ai-gateway/paired-pilots", path))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -10,7 +10,7 @@ import (
 
 func windowV4TestCaps(t *testing.T) []fullWindowCaps {
 	t.Helper()
-	raw, e := os.ReadFile("../../eval/paired-pilots/2026-10-29-cache-price/declaration.json")
+	raw, e := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-29-cache-price/declaration.json")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -119,7 +119,7 @@ func TestFullWindowScopeV4RejectsCoherentMutation(t *testing.T) {
 }
 
 func TestFullWindowScopeV4CapsAreOriginalLargestRemainder(t *testing.T) {
-	raw, e := os.ReadFile("../../eval/paired-pilots/2026-10-29-cache-price/declaration.json")
+	raw, e := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-29-cache-price/declaration.json")
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -20,7 +20,7 @@ import (
 func localCampaignOptions(t *testing.T) LocalCampaignOptions {
 	t.Helper()
 	var plan CampaignPreparationPlan
-	raw, err := os.ReadFile("../../eval/paired-pilots/2026-10-22-campaign-preflight/plan.json")
+	raw, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-22-campaign-preflight/plan.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func localCampaignOptions(t *testing.T) LocalCampaignOptions {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	env, err := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"})
+	env, err := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func localCampaignOptions(t *testing.T) LocalCampaignOptions {
 			t.Error(err)
 		}
 	})
-	return LocalCampaignOptions{DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", Environment: env, Revision: "test-local-rehearsal", Plan: plan}
+	return LocalCampaignOptions{DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", Environment: env, Revision: "test-local-rehearsal", Plan: plan}
 }
 
 func TestLocalCampaignStopsOnDependencyFailures(t *testing.T) {

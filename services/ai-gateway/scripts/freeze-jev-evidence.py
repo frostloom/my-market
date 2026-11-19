@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 
 
 def digest(raw):
@@ -26,7 +27,7 @@ def main():
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args()
     source, output = args.source.resolve(), args.out.resolve()
-    if not source.is_relative_to(ROOT / 'eval/reports') or not output.is_relative_to(ROOT / 'eval/experiments'):
+    if not source.is_relative_to(EVAL / 'reports') or not output.is_relative_to(EVAL / 'experiments'):
         raise ValueError('Use a report source and a new experiment archive inside this repository.')
     if output.exists():
         raise ValueError('Archive already exists; all previous bytes preserved.')
@@ -63,7 +64,7 @@ def main():
                         'source_bytes': len(raw), 'archive_bytes': len(compressed),
                         'source_sha256': digest(raw), 'archive_sha256': digest(compressed)})
     write(output / 'README.md', (source / 'README.md').read_bytes())
-    write(output / 'verify.py', (ROOT / 'eval/experiments/2026-10-08-deepseek-flash/verify.py').read_bytes())
+    write(output / 'verify.py', (EVAL / 'experiments/2026-10-08-deepseek-flash/verify.py').read_bytes())
     for name, destination in [('comparison-offpeak/comparison.json', 'comparison-offpeak.json'),
                                ('comparison-peak/comparison.json', 'comparison-peak.json'),
                                ('revised-task-comparison/comparison.json', 'task-comparison.json'),

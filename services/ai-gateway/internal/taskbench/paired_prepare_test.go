@@ -3,7 +3,7 @@ package taskbench
 import "testing"
 
 func TestPrepareSmallPairPreservesFrozenRules(t *testing.T) {
-	s, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	s, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

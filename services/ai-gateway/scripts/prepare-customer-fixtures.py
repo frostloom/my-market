@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'eval/contracts/2026-10-09-customer-service-v1/cases.json'
-DEFAULT_OUT = ROOT / 'eval/task-suites/2026-10-11-read-fixtures-dev-v1'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'
+DEFAULT_OUT = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1'
 LIMITATIONS = [
     'Future synthetic development definitions, not recovered historical account truth.',
     'No database fixtures instantiated, no model or JEV calls performed.',

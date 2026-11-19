@@ -11,7 +11,7 @@ import (
 
 // This exports data-only wire bytes. It creates no key and signs nothing.
 func TestWindowV13AuthorityWireVector(t *testing.T) {
-	raw, e := os.ReadFile("../../eval/behavior-review/fixtures/v9-contracts/go-delegated-authority.json")
+	raw, e := os.ReadFile("../../../../eval/ai-gateway/behavior-review/fixtures/v9-contracts/go-delegated-authority.json")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -44,7 +44,7 @@ func TestWindowV13AuthorityWireVector(t *testing.T) {
 	}{true, authority, string(canonical), conversationHash(canonical)}
 	encoded, _ := json.MarshalIndent(out, "", "  ")
 	encoded = append(encoded, '\n')
-	path := filepath.Join("../../eval/behavior-review/fixtures/v13-contracts", "go-authority-data.json")
+	path := filepath.Join("../../../../eval/ai-gateway/behavior-review/fixtures/v13-contracts", "go-authority-data.json")
 	if os.Getenv("TASKBENCH_UPDATE_V13_AUTHORITY_VECTOR") == "1" {
 		if e = os.MkdirAll(filepath.Dir(path), 0755); e != nil {
 			t.Fatal(e)

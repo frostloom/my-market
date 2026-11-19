@@ -9,8 +9,9 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-AUDIT = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'
-DEFAULT_OUT = ROOT / 'eval/contracts/2026-10-09-customer-service-v1'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+AUDIT = EVAL / 'reviews/2026-10-09-intent-offline-audit'
+DEFAULT_OUT = EVAL / 'contracts/2026-10-09-customer-service-v1'
 WRITE = {'recharge', 'refund_recharge', 'subscribe_plan', 'change_plan', 'cancel_subscription'}
 READ = {'get_balance', 'get_consumption', 'get_recent_bills', 'list_models', 'list_plans', 'get_my_subscription'}
 INDEPENDENT_SOURCES = {'synthetic_regression', 'frozen_pre_run_fixture'}
@@ -49,13 +50,13 @@ def normalize_text(sample, proof):
 
 def normalization_proof(rows):
     generator = ROOT / 'web/scripts/gen-intent-suite.mjs'
-    manifest = read_json(ROOT / 'eval/intent-suite/manifest.json')
+    manifest = read_json(EVAL / 'intent-suite/manifest.json')
     source = generator.read_text(encoding='utf-8')
     if manifest['generatedBy'] != 'web/scripts/gen-intent-suite.mjs' or 'text = `${text} #${n}`' not in source:
         raise ValueError('Generator provenance changed; normalization refused')
     proof = {}
     for group in manifest['classes']:
-        samples = read_json(ROOT / 'eval/intent-suite' / group['file'])
+        samples = read_json(EVAL / 'intent-suite' / group['file'])
         seen = {}
         # IDs are allocated before the generator shuffles the output rows.
         for sample in sorted(samples, key=lambda s: s['id']):
@@ -64,7 +65,7 @@ def normalization_proof(rows):
                 proof[sample['id']] = {'original_text': sample['text'], 'text': match[1],
                     'base_case_id': seen[match[1]], 'source_file': 'eval/intent-suite/' + group['file'],
                     'generator_sha256': sha(generator.read_bytes()),
-                    'source_sha256': sha((ROOT / 'eval/intent-suite' / group['file']).read_bytes()),
+                    'source_sha256': sha((EVAL / 'intent-suite' / group['file']).read_bytes()),
                     'reason': 'Exact generated duplicate with preceding unsuffixed base in same source class'}
             seen[sample['text']] = sample['id']
     originals = {r['id']: r['original'] for r in rows}
@@ -282,7 +283,7 @@ def score_cases(cases, observations, fixtures=()):
 
 def export(output):
     output = Path(output).resolve()
-    if output.parent != (ROOT / 'eval/contracts').resolve() or output.exists():
+    if output.parent != (EVAL / 'contracts').resolve() or output.exists():
         raise ValueError('Export requires a new directory directly under eval/contracts')
     rows, drafts = read_json(AUDIT / 'reviews.json'), read_json(AUDIT / 'draft-cases.json')
     draft_index = unique_index(drafts)
@@ -291,7 +292,7 @@ def export(output):
     proof = normalization_proof(rows)
     cases = [export_case(r, draft_index[r['id']], proof) for r in rows]
     sources = [AUDIT / 'reviews.json', AUDIT / 'draft-cases.json',
-               ROOT / 'web/scripts/gen-intent-suite.mjs', ROOT / 'eval/intent-suite/manifest.json']
+               ROOT / 'web/scripts/gen-intent-suite.mjs', EVAL / 'intent-suite/manifest.json']
     manifest = {'schema_version': 1, 'version': 'customer-service-contract-v1', 'count': len(cases),
         'normalization_count': len(proof), 'human_independent_review_count': 0,
         'annotation_status': 'ai_posthoc_not_independent_gold', 'fixture_count': 0,

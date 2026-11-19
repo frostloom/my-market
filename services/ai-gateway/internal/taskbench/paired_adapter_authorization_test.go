@@ -21,7 +21,7 @@ func TestRecordedAgentPairRequiresObserverBeforeExecution(t *testing.T) {
 	env, err := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{
 		AllowFixtureCreation: true,
 		AdminDSN:             "root:root@tcp(127.0.0.1:3307)/",
-		ProfilesDir:          "../../eval/runtime-profiles/2026-10-13-six-profiles-v1",
+		ProfilesDir:          "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestRecordedAgentPairRequiresObserverBeforeExecution(t *testing.T) {
 		})
 	}))
 	t.Cleanup(provider.Close)
-	defs := "../../eval/task-definitions/2026-10-12-full-dev-v1"
+	defs := "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1"
 	source, err := LoadConversations(defs)
 	if err != nil {
 		t.Fatal(err)

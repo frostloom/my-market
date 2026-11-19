@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SCRIPT = ROOT / 'scripts/repeated-v5-summary.py'
 
 
@@ -23,7 +24,7 @@ class SummaryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.plan = json.loads((ROOT / 'eval/paired-pilots/2026-10-24-v5-repeated-entry/plan.json').read_text())
+        self.plan = json.loads((EVAL / 'paired-pilots/2026-10-24-v5-repeated-entry/plan.json').read_text())
         self.manifest = {'schema': 'repeated-v5-summary-input.v1', 'mode': 'repeated',
                          'evidence_origin': 'synthetic_test', 'execution_revision': 'a' * 40,
                          'customer_source_revision': '50e3c8dab14b4b6cc25322fd340a274e6970200b',
@@ -209,13 +210,13 @@ class DiagnosticSummaryTests(unittest.TestCase):
 
     def setUp(self):
         SummaryTests.setUp(self)
-        self.plan = json.loads((ROOT / 'eval/paired-pilots/2026-10-26-repeated-diagnostic-entry/plan.json').read_text())
+        self.plan = json.loads((EVAL / 'paired-pilots/2026-10-26-repeated-diagnostic-entry/plan.json').read_text())
         self.manifest['mode'] = 'repeated-export-diagnostic'
         self.manifest['plan'] = self.put('plan.json', self.plan)
         self.receipt.update(schema='authorized-v5-repeated-export-diagnostic.v1',
                             campaign_id='v5-repeated-export-diagnostic-20261025',
                             plan_sha256=self.manifest['plan']['sha256'])
-        self.binding = json.loads((ROOT / 'eval/paired-pilots/2026-10-25-repeated-diagnostic-design/candidate.json').read_text())['candidate_binding']
+        self.binding = json.loads((EVAL / 'paired-pilots/2026-10-25-repeated-diagnostic-design/candidate.json').read_text())['candidate_binding']
         self.receipt.update(self.binding)
 
     def test_diagnostic_scope_keeps_24_pairs_clocks_and_no_population_claim(self):
@@ -253,7 +254,7 @@ class ReceiverSummaryTests(unittest.TestCase):
 
     def setUp(self):
         DiagnosticSummaryTests.setUp(self)
-        base=ROOT/'eval/paired-pilots/2026-10-27-receiver-repeated-entry'
+        base=EVAL/'paired-pilots/2026-10-27-receiver-repeated-entry'
         self.plan=json.loads((base/'plan.json').read_text())
         self.manifest['mode']='receiver-repeated'
         self.manifest['plan']=self.put('receiver-plan.json',self.plan)

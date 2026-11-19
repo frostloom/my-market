@@ -13,8 +13,9 @@ from pathlib import Path, PurePosixPath
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'
-OUT = ROOT / 'eval/reviews/2026-10-13-answer-evidence-v1'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+SOURCE = EVAL / 'reviews/2026-10-09-intent-offline-audit'
+OUT = EVAL / 'reviews/2026-10-13-answer-evidence-v1'
 ARMS = ('nojev', 'hint', 'fast')
 PINNED = {
     'archive-manifest.json': '17244b76e950a2df03a53dc94c1364a63599e1584cb44e4e521e4d363f147a5c',

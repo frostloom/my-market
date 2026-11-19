@@ -14,7 +14,7 @@ import (
 
 // New fixed-scope permission and storage are both required.
 func TestCohortClaimPredecessorsAndPermanentBudget(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-v5-six-cohort-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-six-cohort-entry"
 	p := syntheticCohortPilotAt(t, base, strings.Repeat("a", 40), false)
 	parents := []struct{ id, file string }{{"recharge-confirm-20261023", "prior-confirm-claim.json"}, {"recharge-confirm-diagnostic-retest-20261023", "prior-diagnostic-claim.json"}, {"recharge-cancel-20261024", "prior-cancel-claim.json"}, {"recharge-supplement-20261024", "prior-supplement-claim.json"}, {"refund-cap-20261024", "prior-refund-claim.json"}}
 	for _, broken := range []int{0, 1, 2, 3, 4} {
@@ -95,7 +95,7 @@ func TestCohortClaimPredecessorsAndPermanentBudget(t *testing.T) {
 }
 
 func TestCohortUnreadyDoesNotReadSecrets(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-v5-six-cohort-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-six-cohort-entry"
 	root := t.TempDir()
 	output := filepath.Join(root, "absent")
 	args := []string{"-cohort", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(root, "missing-secret"), "-out", output}
@@ -155,7 +155,7 @@ func syntheticCohortPilotAt(t *testing.T, base, rev string, reformat bool) taskb
 }
 
 func TestCohortFlagIsolation(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-v5-six-cohort-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-v5-six-cohort-entry"
 	args := []string{"-cohort", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json")}
 	for _, extra := range [][]string{{"-retest"}, {"-continue-from", "unused"}, {"-review", "unused"}, {"-continuation-authorization", "unused"}} {
 		var out bytes.Buffer

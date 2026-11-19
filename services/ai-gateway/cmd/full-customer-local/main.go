@@ -37,8 +37,8 @@ func run(args []string) int {
 	dsn := f.String("mysql-dsn", "", "explicit literal-loopback admin DSN without database")
 	revision := f.String("revision", "", "archived executable source revision")
 	out := f.String("out", "", "new output directory")
-	definitions := f.String("definitions", "eval/task-definitions/2026-10-12-full-dev-v1", "frozen definitions")
-	profilesDir := f.String("profiles", "eval/runtime-profiles/2026-10-13-six-profiles-v1", "pinned profiles")
+	definitions := f.String("definitions", "../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "frozen definitions")
+	profilesDir := f.String("profiles", "../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", "pinned profiles")
 	if f.Parse(args) != nil || f.NArg() != 0 || !*execute || *out == "" || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(*revision) || !localAdminDSN(*dsn) {
 		return 2
 	}

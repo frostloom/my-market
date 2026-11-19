@@ -7,7 +7,7 @@ import (
 )
 
 func TestFullCustomerPrimaryPreparation(t *testing.T) {
-	source, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	source, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestFullCustomerPrimaryPreparation(t *testing.T) {
 }
 
 func TestFullCustomerPreparationRejectsRetainedDigestMutation(t *testing.T) {
-	source, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	source, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestFullCustomerPreparationRejectsRetainedDigestMutation(t *testing.T) {
 }
 
 func TestFullCustomerPreparationRejectsIncompleteSource(t *testing.T) {
-	source, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	source, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

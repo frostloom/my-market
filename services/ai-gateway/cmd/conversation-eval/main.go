@@ -12,7 +12,7 @@ import (
 func main() { os.Exit(run(os.Args[1:])) }
 func run(args []string) int {
 	flags := flag.NewFlagSet("conversation-eval", flag.ContinueOnError)
-	definitions := flags.String("definitions", "eval/task-definitions/2026-10-12-full-dev-v1", "frozen development definition directory")
+	definitions := flags.String("definitions", "../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "frozen development definition directory")
 	transcript := flags.String("transcript", "", "local conversation-replay.v1 JSON")
 	out := flags.String("out", "", "new output path (never overwrites)")
 	if flags.Parse(args) != nil {

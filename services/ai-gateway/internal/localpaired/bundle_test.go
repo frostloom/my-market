@@ -120,7 +120,7 @@ func TestMaterializeCampaignBundle(t *testing.T) {
 	if root == "" {
 		t.Skip("LOCAL_PAIRED_BUNDLE is empty")
 	}
-	campaign, err := LoadCampaign("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	campaign, err := LoadCampaign("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

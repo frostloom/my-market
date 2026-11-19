@@ -296,7 +296,7 @@ func TestWindowV8CollectedWindowFixtureExport(t *testing.T) {
 	}
 	modelTransport, modelDials := newFake("model", modelFake, true)
 	jevTransport, jevDials := newFake("jev", jevFake, false)
-	auth := &windowAcquisitionAuthorization{campaign: campaign, source: source, frozenScopeSHA: scopeSHA, frozenExecutionSHA: executionSHA, actualExecutionSHA: executionSHA, observer: observer, observerIdentity: observer.EvaluationIdentity(), modelKey: "synthetic-model-key", jevKey: "synthetic-jev-key", modelUpstream: modelTransport, jevUpstream: jevTransport, fixtureOptions: PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"}, privateReportRoot: reportRoot, evidenceKind: "local_stub"}
+	auth := &windowAcquisitionAuthorization{campaign: campaign, source: source, frozenScopeSHA: scopeSHA, frozenExecutionSHA: executionSHA, actualExecutionSHA: executionSHA, observer: observer, observerIdentity: observer.EvaluationIdentity(), modelKey: "synthetic-model-key", jevKey: "synthetic-jev-key", modelUpstream: modelTransport, jevUpstream: jevTransport, fixtureOptions: PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"}, privateReportRoot: reportRoot, evidenceKind: "local_stub"}
 	operation, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	err = stage("acquire_window_001", func() error { var e error; report, e = runWindowAcquisition(operation, auth); return e })

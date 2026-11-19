@@ -7,7 +7,7 @@ import (
 )
 
 func TestSmallPairedArchiveIntegrity(t *testing.T) {
-	raw, e := os.ReadFile("../../eval/paired-pilots/2026-10-13-dev-v1/plan.json")
+	raw, e := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-13-dev-v1/plan.json")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -18,7 +18,7 @@ func TestSmallPairedArchiveIntegrity(t *testing.T) {
 	if e = json.Unmarshal(raw, &p); e != nil {
 		t.Fatal(e)
 	}
-	s, e := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	s, e := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if e != nil {
 		t.Fatal(e)
 	}

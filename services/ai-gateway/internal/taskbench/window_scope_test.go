@@ -11,11 +11,11 @@ import (
 
 func windowScopeInputs(t *testing.T) (ConversationSuite, PairedProfiles, fullWindowBindings) {
 	t.Helper()
-	s, e := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	s, e := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if e != nil {
 		t.Fatal(e)
 	}
-	p, e := LoadPairedProfiles("../../eval/runtime-profiles/2026-10-13-six-profiles-v1")
+	p, e := LoadPairedProfiles("../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1")
 	if e != nil {
 		t.Fatal(e)
 	}

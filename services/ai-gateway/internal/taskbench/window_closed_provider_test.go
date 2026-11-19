@@ -16,7 +16,7 @@ import (
 func fixtureWindowClosedProviders(t *testing.T) (*windowClosedModelTransport, *windowClosedJEVTransport, string) {
 	t.Helper()
 	root := t.TempDir()
-	model, judge, err := newWindowClosedProviders(windowClosedProviderData{DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", CampaignRoot: filepath.Join(root, "campaign"), CaptureDir: filepath.Join(root, "packets")})
+	model, judge, err := newWindowClosedProviders(windowClosedProviderData{DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", CampaignRoot: filepath.Join(root, "campaign"), CaptureDir: filepath.Join(root, "packets")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestWindowClosedProviderRejectsWrongEndpointIdentityAndReplay(t *testing.T)
 }
 func TestWindowClosedProviderConstructorNewDisjointOnly(t *testing.T) {
 	root := t.TempDir()
-	base := windowClosedProviderData{DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", CampaignRoot: filepath.Join(root, "campaign"), CaptureDir: filepath.Join(root, "packets")}
+	base := windowClosedProviderData{DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", CampaignRoot: filepath.Join(root, "campaign"), CaptureDir: filepath.Join(root, "packets")}
 	model, judge, err := newWindowClosedProviders(base)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestWindowClosedProviderDirectoryReplacementBeforeRequest(t *testing.T) {
 func TestWindowClosedProviderActualOwnedCollectorOnePair(t *testing.T) {
 	auth, oldModel, oldJEV := testWindowCollectorAuthorization(t)
 	dir := filepath.Join(filepath.Dir(auth.campaign.root), "native-packets")
-	model, judge, err := newWindowClosedProviders(windowClosedProviderData{DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", CampaignRoot: auth.campaign.root, CaptureDir: dir})
+	model, judge, err := newWindowClosedProviders(windowClosedProviderData{DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", CampaignRoot: auth.campaign.root, CaptureDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

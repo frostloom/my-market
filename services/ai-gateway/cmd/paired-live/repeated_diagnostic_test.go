@@ -15,7 +15,7 @@ import (
 // Missing mode dispatch must not turn a harmless false-consent check into an error
 // or read its deliberately absent credentials/output.
 func TestRepeatedDiagnosticFalseCheckDoesNotReadCredentials(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-26-repeated-diagnostic-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-26-repeated-diagnostic-entry"
 	dir := t.TempDir()
 	output := filepath.Join(dir, "uncreated")
 	args := []string{"-repeated-diagnostic", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(dir, "missing-env"), "-out", output}
@@ -33,7 +33,7 @@ func TestRepeatedDiagnosticFalseCheckDoesNotReadCredentials(t *testing.T) {
 }
 
 func TestRepeatedDiagnosticClaimChain(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-26-repeated-diagnostic-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-26-repeated-diagnostic-entry"
 	p := syntheticDiagnosticPilotAt(t, base, strings.Repeat("a", 40), false)
 	parents := []struct{ id, file string }{{"recharge-confirm-20261023", "prior-confirm-claim.json"}, {"recharge-confirm-diagnostic-retest-20261023", "prior-diagnostic-claim.json"}, {"recharge-cancel-20261024", "prior-cancel-claim.json"}, {"recharge-supplement-20261024", "prior-supplement-claim.json"}, {"refund-cap-20261024", "prior-refund-claim.json"}, {"v5-six-case-cohort-20261024", "prior-cohort-claim.json"}, {"v5-repeated-cohort-20261024", "prior-repeated-claim.json"}}
 	for _, broken := range []int{0, 1, 2, 3, 4, 5, 6} {
@@ -157,7 +157,7 @@ func syntheticDiagnosticPilotAt(t *testing.T, base, rev string, reformat bool) t
 }
 
 func TestRepeatedDiagnosticRejectsOtherModes(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-26-repeated-diagnostic-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-26-repeated-diagnostic-entry"
 	args := []string{"-repeated-diagnostic", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json")}
 	for _, extra := range [][]string{{"-repeated"}, {"-cohort"}, {"-retest"}, {"-continue-from", "unused"}, {"-review", "unused"}, {"-continuation-authorization", "unused"}} {
 		var out bytes.Buffer

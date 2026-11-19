@@ -6,10 +6,11 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SPEC = importlib.util.spec_from_file_location('jev_overhead', ROOT / 'scripts/analyze-jev-overhead.py')
 overhead = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(overhead)
-PILOT = ROOT / 'eval/paired-pilots/2026-10-17-jev-acceptance-v1'
+PILOT = EVAL / 'paired-pilots/2026-10-17-jev-acceptance-v1'
 
 
 class OverheadTests(unittest.TestCase):

@@ -9,9 +9,9 @@
 //	【意图套件】路由准确性（分类指标：Top-1 / Macro-F1 / OOS 误调用率）
 //	  go run ./cmd/eval -suite intent -mode http -base http://127.0.0.1:18080/portal -key sk-xxx
 //	  go run ./cmd/eval -suite intent -mode http ... -sample 5      # 每类抽 5 条，日常回归
-//	  go run ./cmd/eval -suite intent ... -jev off -out eval/reports/baseline   # 跑 JEV 前基线
+//	  go run ./cmd/eval -suite intent ... -jev off -out ../../eval/ai-gateway/reports/baseline   # 跑 JEV 前基线
 //
-// 输出：stdout 摘要 + eval/reports/ 下的 Markdown 报告。
+// 输出：stdout 摘要 + ../../eval/ai-gateway/reports/（评测资产根 eval/ai-gateway，见其 README）下的 Markdown 报告。
 package main
 
 import (
@@ -37,7 +37,7 @@ func main() {
 	dir := flag.String("dir", "", "用例目录（留空则按 suite 选默认）")
 	base := flag.String("base", "http://127.0.0.1:9105", "http 模式 agent 基地址（意图套件需带 /portal）")
 	key := flag.String("key", "", "http 模式租户 key（缺省用用例自带 key）")
-	out := flag.String("out", "eval/reports", "报告输出目录")
+	out := flag.String("out", "../../eval/ai-gateway/reports", "报告输出目录")
 	sample := flag.Int("sample", 0, "意图套件每类抽样条数（0 = 全量）")
 	workers := flag.Int("workers", 4, "意图套件并发数（过高会让上游排队导致超时，污染指标）")
 	jevMode := flag.String("jev", "unknown", "expected server-side JEV mode: on|off|unknown")
@@ -72,7 +72,7 @@ func runIntent(mode, dir, base, key, out string, perClass, workers int, jevMode,
 		os.Exit(1)
 	}
 	if dir == "" {
-		dir = "eval/intent-suite"
+		dir = "../../eval/ai-gateway/intent-suite"
 	}
 	var normal, adversarial []agent.IntentSample
 	var contractSHA string
@@ -345,7 +345,7 @@ func writeIntentReport(r agent.IntentReport, out string) string {
 
 func runCases(mode, dir, base, key, out string) {
 	if dir == "" {
-		dir = "eval/cases"
+		dir = "../../eval/ai-gateway/cases"
 	}
 	cases, err := agent.LoadEvalCases(dir)
 	if err != nil {

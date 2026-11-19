@@ -13,11 +13,11 @@ import (
 
 func fullAdapterSource(t *testing.T) (ConversationSuite, PairedProfiles) {
 	t.Helper()
-	source, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	source, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	profiles, err := LoadPairedProfiles("../../eval/runtime-profiles/2026-10-13-six-profiles-v1")
+	profiles, err := LoadPairedProfiles("../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

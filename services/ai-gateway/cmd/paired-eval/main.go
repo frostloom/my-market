@@ -35,7 +35,7 @@ func run(args []string) int {
 	protocol := flags.String("protocol", "", "openai or anthropic for offline preflight")
 	revision := flags.String("revision", "", "reviewed execution revision for offline preflight")
 	jevModel := flags.String("jev-model", "", "pinned JEV model for offline preflight")
-	defs := flags.String("definitions", "eval/task-definitions/2026-10-12-full-dev-v1", "frozen definition directory")
+	defs := flags.String("definitions", "../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "frozen definition directory")
 	journal := flags.String("journal", "", "local paired run journal for offline report")
 	out := flags.String("out", "", "new output JSON path; report also creates .md")
 	if flags.Parse(args) != nil {

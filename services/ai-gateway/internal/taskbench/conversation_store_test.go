@@ -156,7 +156,7 @@ func (d *storeConversationDouble) Step(ctx context.Context, _ Fixture, session, 
 }
 
 func TestConversationRealStoreBranches(t *testing.T) {
-	suite, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	suite, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

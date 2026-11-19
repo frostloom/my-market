@@ -22,7 +22,7 @@ func TestLiveJevSemanticsDiagnostic(t *testing.T) {
 	if key == "" {
 		t.Fatal("JEV_API_KEY missing")
 	}
-	normal, attacks, err := LoadIntentSuite("../../eval/intent-suite")
+	normal, attacks, err := LoadIntentSuite("../../../../eval/ai-gateway/intent-suite")
 	if err != nil {
 		t.Fatal(err)
 	}

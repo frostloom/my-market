@@ -10,7 +10,7 @@ import (
 // The real attempt is immutable evidence, including its failures. Reading it
 // must never execute providers or promote the independent review into raw pass.
 func TestFourPilotArchiveIntegrityAndOfflineReport(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-14-four-task-v1"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-14-four-task-v1"
 	raw, err := os.ReadFile(filepath.Join(base, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)

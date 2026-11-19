@@ -21,7 +21,7 @@ import (
 
 func loadRuntimeProfileArchive(t *testing.T) runtimeProfileArchive {
 	t.Helper()
-	base := "../../eval/runtime-profiles/2026-10-13-six-profiles-v1/"
+	base := "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1/"
 	raw, err := os.ReadFile(base + "profiles.json")
 	if err != nil {
 		t.Fatal(err)

@@ -9,7 +9,8 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE = Path('eval/paired-pilots/2026-10-15-langfuse-content-scores-v1')
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+ARCHIVE = EVAL / 'paired-pilots/2026-10-15-langfuse-content-scores-v1'
 NAME = '客服开发任务-1220-v1'
 DASH = '客服本机替身验收-v1（非真实模型成绩）'
 
@@ -93,7 +94,7 @@ def build_plan(root):
                       for name in sorted({x['name'] for x in scores['scores'] if x['dataType'] == 'CATEGORICAL'})]
     configs += [{'name': 'structural_pass', 'dataType': 'BOOLEAN', 'description': '执行结构检查；不等于语义正确。'},
                 {'name': 'http_failures', 'dataType': 'NUMERIC', 'minValue': 0, 'description': '记录的 HTTP 失败次数。'}]
-    scope_raw = (root / 'eval/langfuse-workbench/2026-10-15-v1/trace-scope.json').read_bytes()
+    scope_raw = (EVAL / 'langfuse-workbench/2026-10-15-v1/trace-scope.json').read_bytes()
     if sha(scope_raw) != '51e758dee962a2c3261bc4a86036c4aedaae3e7798197c6899a27b120b6f4e3a':
         raise ValueError('Frozen dashboard scope digest differs')
     scope = json.loads(scope_raw)

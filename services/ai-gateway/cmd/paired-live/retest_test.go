@@ -14,7 +14,7 @@ import (
 )
 
 func TestRetestReadOnlyAndExecutionGate(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-23-cash-read-retest-offline"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-retest-offline"
 	dir := t.TempDir()
 	auth := filepath.Join(dir, "authorization.json")
 	raw, err := os.ReadFile(filepath.Join(base, "authorization.example.json"))
@@ -88,7 +88,7 @@ func TestRetestClaimFixedIdentity(t *testing.T) {
 
 // Approved state exists only in test memory, with a synthetic evidence source.
 func syntheticRetestPilot(t *testing.T, revision string, reformat bool) taskbench.AuthorizedPilot {
-	return syntheticRetestPilotAt(t, "../../eval/paired-pilots/2026-10-23-cash-read-retest-offline", revision, reformat)
+	return syntheticRetestPilotAt(t, "../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-retest-offline", revision, reformat)
 }
 func syntheticRetestPilotAt(t *testing.T, base, revision string, reformat bool) taskbench.AuthorizedPilot {
 	t.Helper()
@@ -147,7 +147,7 @@ func TestRecoveryRetestClaimsSeparateAndFixed(t *testing.T) {
 	}
 	oldpath := filepath.Join(root, ".tmp", "paired-live-retests", taskbench.CashReadRetestID+".json")
 	before, _ := os.ReadFile(oldpath)
-	base := "../../eval/paired-pilots/2026-10-23-cash-read-recovery-retest-offline"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-recovery-retest-offline"
 	newPilot := syntheticRetestPilotAt(t, base, strings.Repeat("b", 40), false)
 	if err := claimRetest(root, newPilot, "new-output"); err == nil {
 		t.Fatal("new build claimed retired runtime scope")
@@ -184,7 +184,7 @@ func TestRecoveryRetestClaimsSeparateAndFixed(t *testing.T) {
 }
 
 func TestRecoveryRetestReadOnlyRemainsUnapproved(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-23-cash-read-recovery-retest-offline"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-recovery-retest-offline"
 	root := t.TempDir()
 	outpath := filepath.Join(root, "output")
 	args := []string{"-retest", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(root, "missing.env"), "-out", outpath}
@@ -220,7 +220,7 @@ func TestRecoveryRetestClaimRejectsUnknownIdentityBeforeIO(t *testing.T) {
 
 func TestHistoricalRechargeCannotClaimNewRuntime(t *testing.T) {
 	for _, base := range []string{"2026-10-23-recharge-confirm-entry", "2026-10-23-recharge-diagnostic-retest-entry", "2026-10-24-recharge-cancel-entry", "2026-10-24-recharge-supplement-entry"} {
-		p := syntheticRetestPilotAt(t, "../../eval/paired-pilots/"+base, strings.Repeat("a", 40), false)
+		p := syntheticRetestPilotAt(t, "../../../../eval/ai-gateway/paired-pilots/"+base, strings.Repeat("a", 40), false)
 		root := t.TempDir()
 		if claimRetest(root, p, "absent") == nil {
 			t.Fatal("historical scope claimed changed runtime")

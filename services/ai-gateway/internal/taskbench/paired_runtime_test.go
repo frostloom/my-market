@@ -17,7 +17,7 @@ func TestPairedRuntimeDisabledBeforeSideEffects(t *testing.T) {
 	if e = RunAgentPair(context.Background(), p, AgentPairOptions{}); e == nil {
 		t.Fatal("default adapter ran")
 	}
-	if _, e = LoadPairedProfiles("../../eval/runtime-profiles/2026-10-13-six-profiles-v1"); e != nil {
+	if _, e = LoadPairedProfiles("../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"); e != nil {
 		t.Fatal(e)
 	}
 }

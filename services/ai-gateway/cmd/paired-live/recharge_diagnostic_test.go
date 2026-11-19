@@ -12,7 +12,7 @@ import (
 // Storage-only; permission rejection is tested separately.
 func TestDiagnosticRechargeClaimPredecessorAndPermanentBudget(t *testing.T) {
 	root := t.TempDir()
-	base := "../../eval/paired-pilots/2026-10-23-recharge-diagnostic-retest-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-recharge-diagnostic-retest-entry"
 	p := syntheticRetestPilotAt(t, base, strings.Repeat("a", 40), false)
 	newPath := filepath.Join(root, ".tmp", "paired-live-retests", "recharge-confirm-diagnostic-retest-20261023.json")
 	if persistRetestClaim(root, p.CampaignID(), p.ExecutionRevision(), "first") == nil {
@@ -59,7 +59,7 @@ func TestDiagnosticRechargeClaimPredecessorAndPermanentBudget(t *testing.T) {
 }
 func TestDiagnosticRechargeUnreadyDoesNotReadSecrets(t *testing.T) {
 	root := t.TempDir()
-	base := "../../eval/paired-pilots/2026-10-23-recharge-diagnostic-retest-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-recharge-diagnostic-retest-entry"
 	output := filepath.Join(root, "absent")
 	args := []string{"-retest", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(root, "missing-secret"), "-out", output}
 	var out bytes.Buffer

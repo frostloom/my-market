@@ -113,7 +113,7 @@ func TestLoadCasesAcceptsDefaultAndExternalDefaults(t *testing.T) {
 }
 
 func TestFrozenBoundaryDevelopmentSuite(t *testing.T) {
-	dir := filepath.Join("..", "..", "eval", "task-suites", "2026-10-09-boundary-dev-v1")
+	dir := filepath.Join("..", "..", "..", "..", "eval", "ai-gateway", "task-suites", "2026-10-09-boundary-dev-v1")
 	cases, err := loadCases(filepath.Join(dir, "cases.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,9 @@ func TestFrozenBoundaryDevelopmentSuite(t *testing.T) {
 			ID   string `json:"id"`
 			Text string `json:"text"`
 		}
-		data, err := os.ReadFile(filepath.Join("..", "..", source.SourcePath))
+		// sources.json 记录的 source_path 为旧模块根相对路径（如 eval/intent-suite/recharge.json）；
+		// R2.6-T2 起评测资产位于仓库顶层 eval/ai-gateway/，按新锚点重解析（冻结数据本身不回改）。
+		data, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "eval", "ai-gateway", strings.TrimPrefix(source.SourcePath, "eval/")))
 		if err != nil {
 			t.Fatal(err)
 		}

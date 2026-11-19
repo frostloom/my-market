@@ -9,7 +9,7 @@ param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Model,
     [ValidateSet('model','jev_selective')][string]$RoutingMode,
     [ValidateRange(1,2147483647)][int]$MaxTasks = 12,
-    [string]$CasesFile = 'eval/task-suites/2026-10-09-boundary-dev-v1/cases.json',
+    [string]$CasesFile = '../../eval/ai-gateway/task-suites/2026-10-09-boundary-dev-v1/cases.json',
     [string]$EvaluatorExe = 'bin/task-eval-v2.exe',
     [int]$Port,
     [switch]$RunEvaluation

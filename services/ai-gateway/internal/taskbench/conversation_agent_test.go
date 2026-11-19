@@ -73,7 +73,7 @@ func localJevScript(intent string, confidence float64) jev.FakeScript {
 }
 
 func TestConversationRealAgentLocalDependencies(t *testing.T) {
-	suite, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	suite, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

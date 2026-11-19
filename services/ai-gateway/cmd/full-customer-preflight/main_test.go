@@ -11,7 +11,7 @@ import (
 )
 
 func offlineArgs(out string) []string {
-	return []string{"-definitions", "../../eval/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", "-revision", strings.Repeat("a", 40), "-out", out}
+	return []string{"-definitions", "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "-profiles", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", "-revision", strings.Repeat("a", 40), "-out", out}
 }
 
 func TestFullCustomerOfflinePreflight(t *testing.T) {
@@ -33,7 +33,7 @@ func TestFullCustomerOfflinePreflight(t *testing.T) {
 	if p.AllowPaid || p.ReadyForPaidRun || p.ModelCalls != 0 || p.JEVCalls != 0 {
 		t.Fatal("offline probe grants permission or calls providers")
 	}
-	source, err := taskbench.LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	source, err := taskbench.LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

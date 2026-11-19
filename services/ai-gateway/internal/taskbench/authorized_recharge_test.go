@@ -11,7 +11,7 @@ import (
 
 func rechargeEntryInputs(t *testing.T) ([]byte, []byte, []byte, []byte) {
 	t.Helper()
-	base := "../../eval/paired-pilots/2026-10-23-recharge-confirm-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-23-recharge-confirm-entry"
 	read := func(n string) []byte {
 		r, e := os.ReadFile(filepath.Join(base, n))
 		if e != nil {
@@ -38,7 +38,7 @@ func TestRechargeEntryFixedScope(t *testing.T) {
 	if err != nil || pilot.Ready() || !hasString(pilot.Blockers(), "runtime_contract_mismatch") || pilot.CampaignID() != "recharge-confirm-20261023" {
 		t.Fatalf("new scope not ready: %v %v", err, pilot.Blockers())
 	}
-	if err = pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err == nil {
+	if err = pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("a", 40)); err == nil {
 		t.Fatal("historical contract accepted execution")
 	}
 	no, err := CheckAuthorizedRetest(alteredJSON(a, "human_authorized", false), p, b, e)

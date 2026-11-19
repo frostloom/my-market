@@ -6,9 +6,10 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE = Path('eval/task-definitions/2026-10-12-full-dev-v1')
-PROFILE = Path('eval/runtime-profiles/2026-10-13-six-profiles-v1/profiles.json')
-OUT = ROOT / 'eval/paired-pilots/2026-10-14-full-preflight-v1'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
+PROFILE = EVAL / 'runtime-profiles/2026-10-13-six-profiles-v1/profiles.json'
+OUT = EVAL / 'paired-pilots/2026-10-14-full-preflight-v1'
 MANIFEST_SHA = 'afaf5fba49893d2c20e91dc8b0e84c998608b82194d6613a6b6549e289ac4181'
 PROFILE_SHA = '83a78d7492c75e0d153cbb9ca4a1a87aa2f15714ad1e855534a084f4848e257d'
 PRIORITY = ('answer_complete', 'explicit_scope_followup', 'supplement_then_confirm', 'confirm', 'no_subscription')

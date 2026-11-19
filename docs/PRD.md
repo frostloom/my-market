@@ -307,8 +307,9 @@ my-market/
 │   │   └── adr/               # 架构决策记录（每条一页）
 │   └── plans/                 # 阶段任务拆解（superpowers 任务清单）
 ├── services/
-│   ├── ai-gateway/            # 整仓迁入（R2.6 结构归位到 services/），模块路径不变，eval/ 随迁
+│   ├── ai-gateway/            # 整仓迁入（R2.6 结构归位到 services/），模块路径不变（eval/ 已于 R2.6-T2 提为顶层 eval/）
 │   └── mall-bff / mall-goods / mall-order / seckill   # 商城侧（根模块）
+├── eval/                      # 统一评测资产（顶层，R2.6-T2）：eval/ai-gateway/ 存量 + 后续 loadtest(R4)/e2e(R6) 按域分目录，规约见 eval/README.md
 ├── web/                       # 商城前端工程（Vue3+Vite+TS 双入口 mall-user/mall-admin，R6；构建产物 go:embed 进 mall-bff）
 ├── proto/                     # 商城侧 .proto（含 Credit/ActivateSubscription 扩展）
 ├── pkg/                       # 商城侧公共库（mallerr/mallpage 等）

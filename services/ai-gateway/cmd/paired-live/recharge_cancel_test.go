@@ -11,7 +11,7 @@ import (
 
 // Storage-only; permission rejection is tested separately.
 func TestCancelRechargeClaimPredecessorsAndPermanentBudget(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-recharge-cancel-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-recharge-cancel-entry"
 	p := syntheticRetestPilotAt(t, base, strings.Repeat("a", 40), false)
 	parents := []struct{ id, file string }{{"recharge-confirm-20261023", "prior-confirm-claim.json"}, {"recharge-confirm-diagnostic-retest-20261023", "prior-diagnostic-claim.json"}}
 	for _, broken := range []int{0, 1} {
@@ -92,7 +92,7 @@ func TestCancelRechargeClaimPredecessorsAndPermanentBudget(t *testing.T) {
 }
 
 func TestCancelRechargeUnreadyDoesNotReadSecrets(t *testing.T) {
-	base := "../../eval/paired-pilots/2026-10-24-recharge-cancel-entry"
+	base := "../../../../eval/ai-gateway/paired-pilots/2026-10-24-recharge-cancel-entry"
 	root := t.TempDir()
 	output := filepath.Join(root, "absent")
 	args := []string{"-retest", "-authorization", filepath.Join(base, "authorization.example.json"), "-plan", filepath.Join(base, "plan.json"), "-billing-evidence", filepath.Join(base, "billing.example.json"), "-env-file", filepath.Join(root, "missing-secret"), "-out", output}

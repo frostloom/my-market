@@ -109,9 +109,9 @@ func TestArchiveBuildRevisionChecksCommittedTreeAndFrozenInputs(t *testing.T) {
 	}
 	git("init", "-q")
 	write("main.go", "package main\n")
-	write("eval/task-definitions/case.yaml", "committed definition\n")
-	write("eval/runtime-profiles/profile.yaml", "committed profile\n")
-	write(".gitignore", "eval/runtime-profiles/ignored.yaml\n")
+	write("eval/ai-gateway/task-definitions/case.yaml", "committed definition\n")
+	write("eval/ai-gateway/runtime-profiles/profile.yaml", "committed profile\n")
+	write(".gitignore", "eval/ai-gateway/runtime-profiles/ignored.yaml\n")
 	git("add", ".")
 	git("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
 	head, tree := git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
@@ -140,7 +140,7 @@ func TestArchiveBuildRevisionChecksCommittedTreeAndFrozenInputs(t *testing.T) {
 			}
 		})
 	}
-	for _, path := range []string{"eval/task-definitions/case.yaml", "eval/runtime-profiles/profile.yaml", "eval/task-definitions/untracked.yaml", "eval/runtime-profiles/untracked.yaml"} {
+	for _, path := range []string{"eval/ai-gateway/task-definitions/case.yaml", "eval/ai-gateway/runtime-profiles/profile.yaml", "eval/ai-gateway/task-definitions/untracked.yaml", "eval/ai-gateway/runtime-profiles/untracked.yaml"} {
 		t.Run(path, func(t *testing.T) {
 			write(path, "changed frozen input\n")
 			if verifyExecutionRevisionWithArchive(root, head, "", true, head, tree) == nil {
@@ -155,7 +155,7 @@ func TestArchiveBuildRevisionChecksCommittedTreeAndFrozenInputs(t *testing.T) {
 			}
 		})
 	}
-	write("eval/runtime-profiles/ignored.yaml", "ignored but read at runtime\n")
+	write("eval/ai-gateway/runtime-profiles/ignored.yaml", "ignored but read at runtime\n")
 	if verifyExecutionRevisionWithArchive(root, head, "", true, head, tree) == nil {
 		t.Fatal("ignored untracked frozen input accepted")
 	}

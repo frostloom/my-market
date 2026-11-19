@@ -14,7 +14,7 @@ import (
 
 func entryPaths(t *testing.T) (string, string) {
 	t.Helper()
-	return "../../eval/paired-pilots/2026-10-22-authorized-small-pilot/authorization.json", "../../eval/paired-pilots/2026-10-22-campaign-preflight/plan.json"
+	return "../../../../eval/ai-gateway/paired-pilots/2026-10-22-authorized-small-pilot/authorization.json", "../../../../eval/ai-gateway/paired-pilots/2026-10-22-campaign-preflight/plan.json"
 }
 
 func TestExecutionRevisionRejectsUnverifiableOrChangedSource(t *testing.T) {

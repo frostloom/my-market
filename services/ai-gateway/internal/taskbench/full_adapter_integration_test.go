@@ -36,7 +36,7 @@ func runFullAdapterLocal(t *testing.T, key, fault string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	env, err := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../eval/runtime-profiles/2026-10-13-six-profiles-v1"})
+	env, err := OpenPairedFixtureEnvironment(ctx, PairedFixtureOptions{AllowFixtureCreation: true, AdminDSN: "root:root@tcp(127.0.0.1:3307)/", ProfilesDir: "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func runFullAdapterLocal(t *testing.T, key, fault string) {
 			t.Error(err)
 		}
 	})
-	o := AgentPairOptions{AllowExecution: true, AllowJEVCalls: true, MaxJEVCalls: 2, DefinitionsDir: "../../eval/task-definitions/2026-10-12-full-dev-v1", Config: cfg, Environment: env, Budget: budget, Model: model, Observer: observer, StopOnStructuralFailure: true, StopOnObserverFailure: true, StopOnFactFailure: true, StopOnJEVFailure: true, JEVFactory: func() jev.Evaluator {
+	o := AgentPairOptions{AllowExecution: true, AllowJEVCalls: true, MaxJEVCalls: 2, DefinitionsDir: "../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", Config: cfg, Environment: env, Budget: budget, Model: model, Observer: observer, StopOnStructuralFailure: true, StopOnObserverFailure: true, StopOnFactFailure: true, StopOnJEVFailure: true, JEVFactory: func() jev.Evaluator {
 		judgeFactories.Add(1)
 		if fault == "jev" {
 			return policyFailureJEV{}

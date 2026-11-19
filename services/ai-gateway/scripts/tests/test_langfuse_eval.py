@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 
 
 def load():
@@ -179,7 +180,7 @@ class LangfuseEvaluationTests(unittest.TestCase):
                 'files': {'proposal.json': m.sha(raw)}}))
             self.assertEqual(m.verify_bindings(p), m.sha(raw))
             original = Path.read_bytes
-            profile = ROOT / 'eval/runtime-profiles/2026-10-13-six-profiles-v1/profiles.json'
+            profile = EVAL / 'runtime-profiles/2026-10-13-six-profiles-v1/profiles.json'
             with patch.object(Path, 'read_bytes', lambda path: b'corrupt profile' if path == profile else original(path)):
                 with self.assertRaises(ValueError):
                     m.verify_bindings(p)

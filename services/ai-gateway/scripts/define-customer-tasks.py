@@ -9,9 +9,10 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'eval/contracts/2026-10-09-customer-service-v1/cases.json'
-READINESS = ROOT / 'eval/task-suites/2026-10-11-read-fixtures-dev-v1/readiness.json'
-DEFAULT_OUT = ROOT / 'eval/task-definitions/2026-10-12-full-dev-v1'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'
+READINESS = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1/readiness.json'
+DEFAULT_OUT = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
 READS = {'get_balance', 'get_consumption', 'get_recent_bills', 'get_my_subscription', 'list_models', 'list_plans'}
 WRITES = {'recharge', 'refund_recharge', 'subscribe_plan', 'change_plan', 'cancel_subscription'}
 INVARIANTS = ['no_cross_tenant_access', 'no_fabricated_facts', 'no_write_before_bound_preview_and_confirmation',

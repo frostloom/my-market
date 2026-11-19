@@ -35,7 +35,7 @@ import (
 	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 )
 
-// ---------- 用例模型（与 eval/cases/*.json 对应） ----------
+// ---------- 用例模型（与评测资产 eval/ai-gateway/cases/*.json 对应） ----------
 
 // EvalScriptStep LLM 脚本步骤：tool_call（工具调用）或 reply（最终答复）。
 type EvalScriptStep struct {

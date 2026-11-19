@@ -7,9 +7,10 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORK = ROOT / 'eval/reports/offline-audit-20261009-1791554983597627200'
-OUT = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'
-DRAFT = ROOT / 'eval/annotations/2026-10-09-intent-contract-v1/cases.json'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+WORK = EVAL / 'reports/offline-audit-20261009-1791554983597627200'
+OUT = EVAL / 'reviews/2026-10-09-intent-offline-audit'
+DRAFT = EVAL / 'annotations/2026-10-09-intent-contract-v1/cases.json'
 ARMS = ('nojev', 'hint', 'fast')
 VERDICTS = ('pass', 'fail', 'unverifiable', 'service_failure')
 PARTS = ('reads_account', 'writes', 'catalog_other', 'adversarial')

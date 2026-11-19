@@ -15,7 +15,7 @@ import (
 
 func retestInputs(t *testing.T) ([]byte, []byte, []byte, []byte) {
 	t.Helper()
-	p, err := os.ReadFile("../../eval/paired-pilots/2026-10-23-cash-read-retest-offline/plan.json")
+	p, err := os.ReadFile("../../../../eval/ai-gateway/paired-pilots/2026-10-23-cash-read-retest-offline/plan.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRetestScopeConsentAndBindings(t *testing.T) {
 	if _, err := CheckAuthorizedRetest(a, p, b, []byte("changed")); err == nil {
 		t.Fatal("changed billing source accepted")
 	}
-	if pilot.ValidateFrozenInputs("../../eval/task-definitions/2026-10-12-full-dev-v1", "../../eval/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("b", 40)) == nil {
+	if pilot.ValidateFrozenInputs("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", "../../../../eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1", strings.Repeat("b", 40)) == nil {
 		t.Fatal("wrong execution revision accepted")
 	}
 	dir := filepath.Join(t.TempDir(), "never")

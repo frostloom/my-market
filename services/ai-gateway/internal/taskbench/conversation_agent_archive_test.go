@@ -10,7 +10,7 @@ import (
 )
 
 func TestConversationAgentLocalCaptureIntegrity(t *testing.T) {
-	base := "../../eval/conversation-regressions/2026-10-13-agent-local-v1"
+	base := "../../../../eval/ai-gateway/conversation-regressions/2026-10-13-agent-local-v1"
 	raw, err := os.ReadFile(filepath.Join(base, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)

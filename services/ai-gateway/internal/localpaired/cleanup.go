@@ -32,7 +32,8 @@ func Clean(allow []string, target string) error {
 }
 
 func requireTask2Cases() error {
-	path := filepath.Join("eval", "campaigns", "2026-11-10-local-paired", "cases.json")
+	// eval 资产自 R2.6-T2 起位于仓库顶层 eval/ai-gateway/；工具以 services/ai-gateway 为 cwd 运行。
+	path := filepath.Join("..", "..", "eval", "ai-gateway", "campaigns", "2026-11-10-local-paired", "cases.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("new question bank: %w", err)
@@ -55,10 +56,15 @@ func exactAllowed(allow []string, target string) bool {
 	return false
 }
 
+// protectedRoots 从 R2.6-T2 起指向仓库顶层 eval/ai-gateway 下的冻结数据：
+// 第一条覆盖相对/绝对路径中的段序列匹配（如从仓库根运行或绝对路径目标）；
+// 第二条覆盖以 services/ai-gateway 为 cwd 时的绝对化前缀推导（removalDeletesProtected）。
+// 含 ".." 的段永远不会出现在待删除目标里（hasDotDot 先拒绝），仅供 cwd 拼接使用。
 var protectedRoots = [][]string{
 	{"billing"},
 	{"ledger"},
-	{"eval", "task-definitions", "2026-10-12-full-dev-v1"},
+	{"eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1"},
+	{"..", "..", "eval", "ai-gateway", "task-definitions", "2026-10-12-full-dev-v1"},
 	{"deploy", "langfuse"},
 }
 

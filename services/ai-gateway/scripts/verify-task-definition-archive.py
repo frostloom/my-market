@@ -6,8 +6,9 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE = ROOT / 'eval/task-definitions/2026-10-12-full-dev-v1'
-SNAPSHOT = ROOT / 'eval/code-snapshots/2026-10-12-full-dev-v1'
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
+SNAPSHOT = EVAL / 'code-snapshots/2026-10-12-full-dev-v1'
 # Pinned from the frozen manifest at c028aa85; never derive this from runtime input.
 FROZEN_MANIFEST_SHA256 = 'afaf5fba49893d2c20e91dc8b0e84c998608b82194d6613a6b6549e289ac4181'
 ARCHIVED_BINDINGS = ('internal/agent/tools.go', 'internal/billing/store/plan.go')

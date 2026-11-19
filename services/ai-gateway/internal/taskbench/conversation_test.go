@@ -64,7 +64,7 @@ func rechargeDriver() *scriptedConversation {
 }
 
 func TestConversationFrozenDefinitionsLoadAllBranches(t *testing.T) {
-	suite, err := LoadConversations("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	suite, err := LoadConversations("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,12 +194,12 @@ func TestConversationSummarySeparatesScopeAndFailureDenominators(t *testing.T) {
 
 func TestConversationLoaderRejectsTamperedArchive(t *testing.T) {
 	dir := t.TempDir()
-	files, err := os.ReadDir("../../eval/task-definitions/2026-10-12-full-dev-v1")
+	files, err := os.ReadDir("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range files {
-		raw, err := os.ReadFile(filepath.Join("../../eval/task-definitions/2026-10-12-full-dev-v1", f.Name()))
+		raw, err := os.ReadFile(filepath.Join("../../../../eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1", f.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
