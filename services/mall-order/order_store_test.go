@@ -362,7 +362,7 @@ func TestCreateCartOrder_SubscriptionQtyLimitOne(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
-	snapshotStock(t, s, 301)
+	snapshotStock(t, s, 301, 113) // 正例分支对 113 有 qty=2 扣减，一并快照还原
 	seedSubscriptionGoods(t, s)
 	before := stockOf(t, s, 301)
 
