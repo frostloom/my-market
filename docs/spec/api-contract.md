@@ -58,7 +58,7 @@
 | MALL_20002 | 409 | false | 商品已下架 |
 | MALL_20003 | 409 | false | 库存不足 |
 | MALL_20004 | 409 | false | 购物车行数超上限（20） |
-| MALL_20005 | 400 | false | 商品数量超限（qty>99 或 <1） |
+| MALL_20005 | 400 | false | 商品数量超限（qty>99 或 <1；**订阅商品 qty 必须=1**——加购/合并/改量/下单四口同守，R2.5 起） |
 | MALL_20006 | 404 | false | 品类不存在 |
 | MALL_30001 | 404 | false | 订单不存在 |
 | MALL_30002 | 409 | false | 订单状态不允许该操作（如已支付再支付/已关闭再退） |
@@ -113,7 +113,7 @@
 | 端点 | 语义 |
 |---|---|
 | GET /cart | 200 `{"items":[{"id":..,"goods":Goods,"qty":..}],"total_cent":..}` |
-| POST /cart/items | body `{"goods_id":..,"qty":1}`，upsert（同商品合并 qty）；上限 20 行、qty≤99；recharge/秒杀商品返回 MALL_30007 |
+| POST /cart/items | body `{"goods_id":..,"qty":1}`，upsert（同商品合并 qty）；上限 20 行、qty≤99；**subscription 商品 qty 恒 1（MALL_20005）**；recharge/秒杀商品返回 MALL_30007 |
 | PATCH /cart/items/{id} | body `{"qty":..}`；qty=0 等价删除 |
 | DELETE /cart/items/{id} | 200 `{}`；幂等 |
 

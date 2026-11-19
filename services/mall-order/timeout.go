@@ -142,6 +142,7 @@ func (s *Store) closeOrder(ctx context.Context, orderNo string, reason int8) (bo
 //     （否则 stock 虚增、污染种子锚点——TestCancelRechargeOrder_RestockMatchesDeduction）；
 //   - 其他 kind（如未来的 seckill）：按 limited=1 行保守回补；接入时若扣减
 //     口径不同，需同步此处。
+//
 // 注意：对称依据是 goods.limited 的**当前值**而非建单时快照；若 recharge
 // 商品在单据存续期内翻转 limited，存在少补/多补一枚的理论窗口（已记台账）。
 func restockOrder(tx *gorm.DB, orderNo string) error {

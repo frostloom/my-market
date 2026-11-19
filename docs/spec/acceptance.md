@@ -46,10 +46,12 @@
 
 ## R2.5 月卡
 
-- [ ] billing 新增 ActivateSubscription gRPC：幂等 ref、模拟月费校验、已有订阅=续一期（单测三分支）
-- [ ] 混合单（general+月卡）支付后：general 行发货 done、月卡行订阅生效、订单 fulfilled
-- [ ] 月卡生效后推理：窗口额度内 funding=subscription、余额不动（/me/overview 验证）；超额 402
-- [ ] 退款：混合单 fulfilled 退款 → general 行回补、月卡行退订语义（当期保留、不退费）
+> 2026-11-19 回填：R2.5 已完成（4/4 达成，证据见 docs/plans/sdd-archive-R2.5/R2.5-ledger.md 与 task 报告；SMOKE R2.5 三轮 PASS，含免费窗口/超额 402/退订不退费）。
+
+- [x] billing 新增 ActivateSubscription gRPC：幂等 ref、模拟月费校验、已有订阅=续一期（单测三分支）
+- [x] 混合单（general+月卡）支付后：general 行发货 done、月卡行订阅生效、订单 fulfilled
+- [x] 月卡生效后推理：窗口额度内 funding=subscription、余额不动（/me/overview 验证）；超额 402
+- [x] 退款：混合单 fulfilled 退款 → general 行回补、月卡行退订语义（当期保留、不退费）
 
 ## R3 K8s 化（七项逐一验收）
 

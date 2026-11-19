@@ -11,7 +11,7 @@
 //     （ref_type="mall", ref_id=order_no:line_no）独立（ADR-005），实际退额 =
 //     min(请求额, 当前余额)（billing 侧已保证），以 returned refunded_cent 记实退额；
 //   - general（ship）行：直接退（mock 渠道无真实资金流，按行快照价×qty 记退款额）
-//     + 回补库存（restockOrder 既有对称口径：kind=2 全行 / kind=1 仅 limited 行）；
+//   - 回补库存（restockOrder 既有对称口径：kind=2 全行 / kind=1 仅 limited 行）；
 //   - subscription 行（R2.5）：D15「退款=退订」——调 billing.CancelSubscription
 //     （ref="mall-sub-refund:{order_no}:{line_no}"，审计 ref；幂等来自 billing
 //     状态定点收敛：已退订重放 cancelled=false no-op，无生效/当期订阅 → NotFound
