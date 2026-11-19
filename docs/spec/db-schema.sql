@@ -92,6 +92,7 @@ CREATE TABLE `mall_order_items` (
   `price_snapshot_cent` BIGINT       NOT NULL COMMENT '下单时行价格快照',
   `face_value_cent`     BIGINT       NOT NULL DEFAULT 0,
   `bonus_cent`          BIGINT       NOT NULL DEFAULT 0,
+  `ref_plan_id`         BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '订阅行下单时快照 billing plan id（general/recharge 行=0）',
   `created_at`          DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_line` (`order_id`, `line_no`),

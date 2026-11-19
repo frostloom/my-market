@@ -46,19 +46,29 @@ import (
 // ---------------------------------------------------------------------------
 // BillingClient 桩（纯内存，不连网）
 
-// stubBilling BillingClient 桩：捕获 Credit/Refund 请求，按预设序列回放应答。
+// stubBilling BillingClient 桩：捕获 Credit/Refund/ActivateSubscription/
+// CancelSubscription 请求，按预设序列回放应答。
 type stubBilling struct {
 	mu sync.Mutex
 	// credits/refunds 捕获的入站请求（调用序）。
 	credits []*billingv1.CreditRequest
 	refunds []*billingv1.RefundRequest
+	// activates/cancels 捕获的订阅开通/退订请求（调用序，R2.5-T2）。
+	activates []*billingv1.ActivateSubscriptionRequest
+	cancels   []*billingv1.CancelSubscriptionRequest
 	// nextCreditReplies 依次回放的 Credit 应答；耗尽后缺省 created=true。
 	nextCreditReplies []*billingv1.CreditReply
-	// creditErr 非空时 Credit 每次返回该错误（故障注入，走 worker 退避）。
-	creditErr error
-	// onCredit Credit 调用时的副作用钩子（竞态注入：模拟并发退款在 Credit
-	// 提交后作废任务行等现场）；在锁外调用需自行保证幂等。
-	onCredit func(*billingv1.CreditRequest)
+	// nextActivateReplies 依次回放的 ActivateSubscription 应答；耗尽后缺省
+	// activated=true（首次开通）。
+	nextActivateReplies []*billingv1.ActivateSubscriptionReply
+	// creditErr / activateErr 非空时对应方法每次返回该错误（故障注入，
+	// 走 worker 退避）。
+	creditErr   error
+	activateErr error
+	// onCredit / onActivate 对应调用时的副作用钩子（竞态注入：模拟并发退款
+	// 在 billing 提交后作废任务行等现场）；在锁外调用需自行保证幂等。
+	onCredit   func(*billingv1.CreditRequest)
+	onActivate func(*billingv1.ActivateSubscriptionRequest)
 }
 
 func (b *stubBilling) Credit(ctx context.Context, req *billingv1.CreditRequest, _ ...grpc.CallOption) (*billingv1.CreditReply, error) {
@@ -89,6 +99,35 @@ func (b *stubBilling) Refund(_ context.Context, req *billingv1.RefundRequest, _ 
 	return &billingv1.RefundReply{RefundedCent: req.GetAmountCent()}, nil
 }
 
+func (b *stubBilling) ActivateSubscription(ctx context.Context, req *billingv1.ActivateSubscriptionRequest, _ ...grpc.CallOption) (*billingv1.ActivateSubscriptionReply, error) {
+	b.mu.Lock()
+	b.activates = append(b.activates, req)
+	activateErr, hook := b.activateErr, b.onActivate
+	b.mu.Unlock()
+	if hook != nil {
+		hook(req)
+	}
+	if activateErr != nil {
+		return nil, activateErr
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.nextActivateReplies) > 0 {
+		rep := b.nextActivateReplies[0]
+		b.nextActivateReplies = b.nextActivateReplies[1:]
+		return rep, nil
+	}
+	return &billingv1.ActivateSubscriptionReply{Activated: true, IsRenewal: false,
+		Subscription: &billingv1.SubscriptionSummary{PlanId: req.GetPlanId(), Status: "active"}}, nil
+}
+
+func (b *stubBilling) CancelSubscription(_ context.Context, req *billingv1.CancelSubscriptionRequest, _ ...grpc.CallOption) (*billingv1.CancelSubscriptionReply, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cancels = append(b.cancels, req)
+	return &billingv1.CancelSubscriptionReply{Cancelled: true}, nil
+}
+
 func (b *stubBilling) creditCalls() []*billingv1.CreditRequest {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -101,12 +140,26 @@ func (b *stubBilling) refundCalls() []*billingv1.RefundRequest {
 	return append([]*billingv1.RefundRequest(nil), b.refunds...)
 }
 
+func (b *stubBilling) activateCalls() []*billingv1.ActivateSubscriptionRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]*billingv1.ActivateSubscriptionRequest(nil), b.activates...)
+}
+
+func (b *stubBilling) cancelCalls() []*billingv1.CancelSubscriptionRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]*billingv1.CancelSubscriptionRequest(nil), b.cancels...)
+}
+
 // recordingBilling 真 billing client 的记录包装：透传每次调用并捕获
-// CreditReply（断言重放轮 created=false 用）。
+// CreditReply / ActivateSubscriptionReply（断言重放轮 created/activated=false 用）。
 type recordingBilling struct {
-	inner   BillingClient
-	mu      sync.Mutex
-	replies []*billingv1.CreditReply
+	inner BillingClient
+	mu    sync.Mutex
+	// replies / activateReplies 捕获的成功应答（调用序）。
+	replies         []*billingv1.CreditReply
+	activateReplies []*billingv1.ActivateSubscriptionReply
 }
 
 func (r *recordingBilling) Credit(ctx context.Context, in *billingv1.CreditRequest, opts ...grpc.CallOption) (*billingv1.CreditReply, error) {
@@ -123,10 +176,30 @@ func (r *recordingBilling) Refund(ctx context.Context, in *billingv1.RefundReque
 	return r.inner.Refund(ctx, in, opts...)
 }
 
+func (r *recordingBilling) ActivateSubscription(ctx context.Context, in *billingv1.ActivateSubscriptionRequest, opts ...grpc.CallOption) (*billingv1.ActivateSubscriptionReply, error) {
+	rep, err := r.inner.ActivateSubscription(ctx, in, opts...)
+	if err == nil {
+		r.mu.Lock()
+		r.activateReplies = append(r.activateReplies, rep)
+		r.mu.Unlock()
+	}
+	return rep, err
+}
+
+func (r *recordingBilling) CancelSubscription(ctx context.Context, in *billingv1.CancelSubscriptionRequest, opts ...grpc.CallOption) (*billingv1.CancelSubscriptionReply, error) {
+	return r.inner.CancelSubscription(ctx, in, opts...)
+}
+
 func (r *recordingBilling) creditReplies() []*billingv1.CreditReply {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]*billingv1.CreditReply(nil), r.replies...)
+}
+
+func (r *recordingBilling) activateReplyLog() []*billingv1.ActivateSubscriptionReply {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*billingv1.ActivateSubscriptionReply(nil), r.activateReplies...)
 }
 
 // ---------------------------------------------------------------------------

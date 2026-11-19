@@ -2,7 +2,7 @@
 //
 // TDD 硬要求：本文件先于实现编写（RED），实现后转 GREEN。
 // 断言锚点 = scripts/seed-goods.sql 种子（101-140 general、201-203 recharge、
-// 301 subscription 未上架）。测试写入的 orders/items/cart 行与扣减的 stock
+// 301 subscription 月卡已上架，R2.5）。测试写入的 orders/items/cart 行与扣减的 stock
 // 一律在 t.Cleanup 还原（种子 44 商品锚点不被污染），可重复跑。
 //
 // DSN 来源：环境变量 MARKET_MYSQL_DSN 优先；未设置则从 deploy/compose/.env

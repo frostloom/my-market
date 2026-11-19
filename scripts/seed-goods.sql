@@ -1,6 +1,9 @@
 -- R1-T1: market 商品种子（scripts/seed-goods.sql）。
 --
--- 前置：bash scripts/schema-apply.sh 已执行（market 库 9 张表 + 六品类就绪）。
+-- 前置：bash scripts/schema-apply.sh 已执行（market 库 9 张表 + 六品类就绪）；
+-- **必须先跑 scripts/seed-plans.sql**（billing ai_gateway.plans 套餐）——
+-- goods 301 的 ref_plan_id 按套餐名「月度·标准」解析，套餐缺失则本脚本
+-- 写入 NULL 撞 NOT NULL 报错（依赖显式化，不静默落 0）。
 -- 应用（宿主执行；凭据从 deploy/compose/.env 读，不硬编码、不落 argv）：
 --   docker compose -f deploy/compose/docker-compose.yml exec -T \
 --     -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql \
@@ -10,7 +13,8 @@
 -- ON DUPLICATE KEY UPDATE（MySQL 8.0.19+），重复执行 = 原位更新，不产生重复行。
 --   id 段位：101-140 general（手机/服饰/穿搭/家居 各 10）
 --            201-203 recharge（¥10/¥50/¥100 面值，bonus 0/300/1000 分）
---            301 subscription 占位（ref_plan_id=0，on_sale=0，R2.5 接入 billing plan 前不可售）
+--            301 subscription 会员月卡（R2.5：上架 on_sale=1，ref_plan_id 指向
+--            billing「月度·标准」套餐；价格 8000 分=¥80 与套餐月费对齐）
 -- 品类归属（裁定口径）：
 --   - general 只进 手机/服饰/穿搭/家居 四个真实品类（品类 id 按名称查，不硬编码自增值）；
 --   - 精选 = 运营位聚合、福利 = 秒杀入口，均不直接挂商品；
@@ -27,6 +31,9 @@ SET @cat_phone    = (SELECT id FROM categories WHERE name = '手机');
 SET @cat_cloth    = (SELECT id FROM categories WHERE name = '服饰');
 SET @cat_outfit   = (SELECT id FROM categories WHERE name = '穿搭');
 SET @cat_home     = (SELECT id FROM categories WHERE name = '家居');
+-- R2.5：goods 301 关联的 billing 套餐 id 按名解析（跨库同实例引用 ai_gateway.plans；
+-- seed-plans.sql 已保证该行存在，缺失则下方 INSERT 撞 NOT NULL 报错而非静默落 0）。
+SET @r25_plan_id = (SELECT id FROM ai_gateway.plans WHERE name = '月度·标准' AND status = 0);
 
 -- ==================== general（type=1）====================
 INSERT INTO goods
@@ -81,8 +88,8 @@ VALUES
   (201, 2, 0, '余额充值 ¥10',  '到账 10.00 元',                 1000,  0, 1000,    0, '/img/goods/201.png', 0, 0, 0, 1),
   (202, 2, 0, '余额充值 ¥50',  '到账 53.00 元（赠 ¥3）',        5000,  0, 5000,  300, '/img/goods/202.png', 0, 0, 0, 1),
   (203, 2, 0, '余额充值 ¥100', '到账 110.00 元（赠 ¥10）',     10000,  0, 10000, 1000, '/img/goods/203.png', 0, 0, 0, 1),
-  -- ---- subscription（type=3）占位：R2.5 接入 billing plan（ref_plan_id>0）前不可售 ----
-  (301, 3, 0, '会员订阅（占位）', 'R2.5 对接 billing plan 后开放，价格以 plan 为准', 2900, 0, 0, 0, '/img/goods/301.png', 0, 0, 0, 0)
+  -- ---- subscription（type=3）：会员月卡，关联 billing「月度·标准」套餐（R2.5 上架） ----
+  (301, 3, 0, '会员月卡·标准', '月度·标准套餐 | ¥80/月 · 30 天 · 每 5h 滚动额度', 8000, 0, 0, 0, '/img/goods/301.png', 999, 0, @r25_plan_id, 1)
 AS new
 ON DUPLICATE KEY UPDATE
   type            = new.type,
@@ -123,9 +130,16 @@ SELECT
   (SELECT COUNT(*) FROM goods WHERE type = 2) AS recharge_count;
 
 SELECT
-  CASE WHEN (SELECT COUNT(*) FROM goods WHERE type = 3 AND ref_plan_id = 0 AND on_sale = 0) = 1 THEN 'PASS' ELSE 'FAIL' END
-    AS chk_subscription_placeholder,
+  CASE WHEN (SELECT COUNT(*) FROM goods WHERE type = 3 AND ref_plan_id > 0 AND on_sale = 1) = 1 THEN 'PASS' ELSE 'FAIL' END
+    AS chk_subscription_onsale,
   (SELECT COUNT(*) FROM goods WHERE type = 3) AS subscription_count;
+
+-- R2.5：goods 301 与 billing 套餐联动自检（跨库 JOIN：关联行存在、在售、定期、30 天）。
+SELECT
+  CASE WHEN (SELECT COUNT(*) FROM goods g JOIN ai_gateway.plans p ON g.ref_plan_id = p.id
+             WHERE g.id = 301 AND p.status = 0 AND p.plan_type = 'recurring' AND p.validity_days = 30) = 1
+       THEN 'PASS' ELSE 'FAIL' END
+    AS chk_goods301_plan_linkage;
 
 SELECT
   CASE WHEN (SELECT COUNT(*) FROM goods WHERE type = 1 AND (on_sale <> 1 OR stock < 100)) = 0 THEN 'PASS' ELSE 'FAIL' END

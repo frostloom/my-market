@@ -5,15 +5,15 @@
 #   deploy/compose 三 profile（infra + ai + mall）已起且 healthy——
 #     docker compose -f deploy/compose/docker-compose.yml \
 #       --profile infra --profile ai --profile mall up -d
-#   market 库种子已就绪（bash scripts/schema-apply.sh + seed-goods.sql，
-#   44 商品：general 101-140 / recharge 201-203 / subscription 301 下架不进列表）。
+#   market 库种子已就绪（bash scripts/schema-apply.sh + seed-plans.sql + seed-goods.sql，
+#   44 商品：general 101-140 / recharge 201-203 / subscription 301 月卡——R2.5 起上架）。
 #
 # 步骤（api-contract §2-§5 顺序，目标 http://localhost:18090/api/v1）：
 #   1) 前置健康：bff /healthz + goods/order 容器 healthy + gateway(:18080) 可达
 #      + MySQL market 库可达
 #   2) 幂等造数：goods#113 详情富文本回填（种子 detail 为 NULL，R1 详情断言需要）
 #   3) 注册（随机用户名）→ 登录 → categories=6 → /goods 游标翻页至 next_cursor=null
-#      （断言 ≥2 页；on_sale=1 共 43 = 40 general + 3 recharge，subscription 下架不进列表）
+#      （断言 ≥2 页；on_sale=1 共 44 = 40 general + 3 recharge + 1 subscription，R2.5 起 301 上架）
 #   4) 详情 #113：type=general（proto 编码 1）+ detail 非空
 #   5) 购物车：#113 qty1 + #113 qty2（同商品合并=3）+ #121 qty1 → cart total=Σ价×qty
 #   6) 下单（Idempotency-Key）→ 201 + 行快照 + 同 key 重发返回原单；断言 general
@@ -149,7 +149,7 @@ else
   fail "categories 异常（HTTP $HTTP_CODE items=${CAT_N:-?}，期望 6）"
 fi
 
-# 游标翻页至 next_cursor=null（page_size=20；on_sale=1 共 43）
+# 游标翻页至 next_cursor=null（page_size=20；on_sale=1 共 44）
 PAGES=0; TOTAL=0; CURSOR=""; PAGE_OK=1
 while :; do
   if [ -n "$CURSOR" ]; then req GET "/goods?cursor=$(jq -rn --arg c "$CURSOR" '$c|@uri')" ; else req GET "/goods?page_size=20"; fi
@@ -161,10 +161,10 @@ while :; do
   [ -z "$CURSOR" ] && break
   [ "$PAGES" -ge 20 ] && break # 防御：异常不收敛时跳出
 done
-if [ "$PAGE_OK" = "1" ] && [ "$PAGES" -ge 2 ] && [ "$TOTAL" = "43" ]; then
-  pass "goods 翻页到底：$PAGES 页 / 43 条（next_cursor=null 到底；40 general + 3 recharge）"
+if [ "$PAGE_OK" = "1" ] && [ "$PAGES" -ge 2 ] && [ "$TOTAL" = "44" ]; then
+  pass "goods 翻页到底：$PAGES 页 / 44 条（next_cursor=null 到底；40 general + 3 recharge + 1 subscription）"
 else
-  fail "goods 翻页异常（pages=$PAGES total=$TOTAL page_ok=$PAGE_OK，期望 ≥2 页且 43 条）"
+  fail "goods 翻页异常（pages=$PAGES total=$TOTAL page_ok=$PAGE_OK，期望 ≥2 页且 44 条）"
 fi
 
 # ---------- 4) 详情 ----------

@@ -1,6 +1,7 @@
 // mall-goods 集成测试：连 dev MySQL（deploy/compose，宿主 3307，market 库）。
 // 只读断言 R1-T1 种子数据（scripts/seed-goods.sql：44 行商品、六品类、
-// 手机/服饰/穿搭/家居 各 10 件在售、301 subscription 未上架），不写库、可重复跑。
+// 手机/服饰/穿搭/家居 各 10 件在售、301 subscription 月卡已上架——R2.5），
+// 不写库、可重复跑。
 //
 // DSN 来源：环境变量 MARKET_MYSQL_DSN 优先；未设置则从 deploy/compose/.env
 // 读 MYSQL_ROOT_PASSWORD 拼接（凭据不硬编码、不提交、不打日志）。
@@ -25,10 +26,10 @@ import (
 // 种子锚点（scripts/seed-goods.sql 显式主键段位；断言即种子完整性校验）。
 const (
 	seedGoodsTotal      = 44  // 40 general + 3 recharge + 1 subscription
-	seedOnSaleTotal     = 43  // 301 subscription on_sale=0
+	seedOnSaleTotal     = 44  // 全部在售（R2.5：301 月卡已上架）
 	seedPhoneCount      = 10  // 101-110
 	seedRechargeFirstID = 201 // ¥10 档
-	seedSubscriptionID  = 301 // 未上架占位
+	seedSubscriptionID  = 301 // 会员月卡·标准（R2.5 上架，ref_plan_id 关联 billing 套餐）
 	seedHostPort        = "127.0.0.1:3307"
 )
 
@@ -360,15 +361,36 @@ func TestGetGoods_NotFound(t *testing.T) {
 }
 
 // TestGetGoods_OffSaleReturned 未上架商品原样返回（on_sale=false），
-// 错误与 409 的裁量在 bff——goods 服务不吞 301。
+// 错误与 409 的裁量在 bff——goods 服务不吞下架行。
+// R2.5 起种子 44 件全部在售（301 月卡已上架），故临时下架 113 造未上架锚
+// （结束还原；基础设施套件禁并发，无跨包交错）。
 func TestGetGoods_OffSaleReturned(t *testing.T) {
 	s := openTestStore(t)
-	row, err := s.GetGoods(context.Background(), seedSubscriptionID)
+	ctx := context.Background()
+
+	// R2.5 锚：301 月卡已上架，详情原样返回且带 billing 套餐关联。
+	row, err := s.GetGoods(ctx, seedSubscriptionID)
 	if err != nil {
 		t.Fatalf("get 301: %v", err)
 	}
-	if row.OnSale != 0 {
-		t.Fatalf("301 on_sale = %d，want 0（未上架原样返回）", row.OnSale)
+	if row.OnSale != 1 || row.RefPlanID == 0 {
+		t.Fatalf("301 = (on_sale=%d, ref_plan_id=%d)，want (1, >0)（R2.5 已上架关联套餐）",
+			row.OnSale, row.RefPlanID)
+	}
+
+	// 未上架原样返回（不吞行）：临时下架 113。
+	if err := s.db.Exec("UPDATE goods SET on_sale = 0 WHERE id = 113").Error; err != nil {
+		t.Fatalf("临时下架 113: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = s.db.Exec("UPDATE goods SET on_sale = 1 WHERE id = 113").Error
+	})
+	off, err := s.GetGoods(ctx, 113)
+	if err != nil {
+		t.Fatalf("get 113（已下架）: %v", err)
+	}
+	if off.OnSale != 0 {
+		t.Fatalf("113 on_sale = %d，want 0（未上架原样返回）", off.OnSale)
 	}
 }
 

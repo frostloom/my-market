@@ -52,10 +52,11 @@ func paymentRecord(t *testing.T, s *Store, orderNo string) (status int8, amountC
 
 // taskState 履约任务行读出（status: 1 pending 2 done 3 failed 4 voided）。
 type taskState struct {
-	LineNo     int32 `gorm:"column:line_no"`
-	TaskType   int8  `gorm:"column:task_type"`
-	Status     int8  `gorm:"column:status"`
-	RetryCount int   `gorm:"column:retry_count"`
+	ID         uint64 `gorm:"column:id"`
+	LineNo     int32  `gorm:"column:line_no"`
+	TaskType   int8   `gorm:"column:task_type"`
+	Status     int8   `gorm:"column:status"`
+	RetryCount int    `gorm:"column:retry_count"`
 }
 
 // taskRowsOf 读订单履约任务行。
@@ -63,7 +64,7 @@ func taskRowsOf(t *testing.T, s *Store, orderNo string) []taskState {
 	t.Helper()
 	var rows []taskState
 	if err := s.db.Raw(
-		"SELECT line_no, task_type, status, retry_count FROM fulfillment_tasks WHERE order_no = ? ORDER BY line_no",
+		"SELECT id, line_no, task_type, status, retry_count FROM fulfillment_tasks WHERE order_no = ? ORDER BY line_no",
 		orderNo).Scan(&rows).Error; err != nil {
 		t.Fatalf("read fulfillment_tasks %s: %v", orderNo, err)
 	}

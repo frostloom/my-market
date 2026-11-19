@@ -110,8 +110,33 @@ func TestCart_UpsertMergeAndLimits(t *testing.T) {
 	// -- 类型与在售校验：recharge 拒 30007、未上架拒 20002、不存在拒 20001
 	_, err = s.AddCart(ctx, testTenantC, 201, 1)
 	assertMallCode(t, err, mallerr.CodeGoodsTypeNotAllowed)
-	_, err = s.AddCart(ctx, testTenantC, 301, 1) // subscription 占位 on_sale=0
+	// goods 301（R2.5 月卡）已上架、subscription 可购：应加购成功（先加后删，
+	// 不影响下方行数计数）；未上架锚改用临时下架的 113。
+	mustAddCart(t, s, testTenantC, 301, 1)
+	v, _ = s.GetCart(ctx, testTenantC)
+	id301 := uint64(0)
+	for _, it := range v.Items {
+		if it.GoodsID == 301 {
+			id301 = it.ID
+		}
+	}
+	if id301 == 0 {
+		t.Fatalf("上架的 subscription 商品 301 应可加购")
+	}
+	if err := s.db.Exec("UPDATE goods SET on_sale = 0 WHERE id = 113").Error; err != nil {
+		t.Fatalf("临时下架 113: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = s.db.Exec("UPDATE goods SET on_sale = 1 WHERE id = 113").Error
+	})
+	_, err = s.AddCart(ctx, testTenantC, 113, 1)
 	assertMallCode(t, err, mallerr.CodeGoodsOffSale)
+	if err := s.db.Exec("UPDATE goods SET on_sale = 1 WHERE id = 113").Error; err != nil {
+		t.Fatalf("还原 113 在售: %v", err)
+	}
+	if _, err = s.RemoveCart(ctx, testTenantC, id301); err != nil {
+		t.Fatalf("RemoveCart(301): %v", err)
+	}
 	_, err = s.AddCart(ctx, testTenantC, 999999, 1)
 	assertMallCode(t, err, mallerr.CodeGoodsNotFound)
 
