@@ -27,7 +27,7 @@
 
 ## 后果
 
-- R2/R2.5 各含一段 billing 侧开发与单测（含在 ai-gateway 目录内）；
+- R2/R2.5 各含一段 billing 侧开发与单测（含在 ai-gateway 目录内，R2.6 起为 services/ai-gateway/）；
 - gateway billing.proto 需扩展（加法）；api-reference 同步更新；
-- proto 由此移至 `ai-gateway/pkg/proto/billing/v1`（R2 T1），go.work 下 mall 各服务可直接 import `billingv1` 契约；
+- proto 由此移至 `ai-gateway/pkg/proto/billing/v1`（R2 T1；R2.6 起目录为 `services/ai-gateway/pkg/proto/billing/v1`，模块路径不变），go.work 下 mall 各服务可直接 import `billingv1` 契约；
 - 激活锚的 0 元流水会出现在租户入账流水列表（展示为 0 元「subscription」行）——这是有意的审计面；金额口径（余额/对账）不受影响。

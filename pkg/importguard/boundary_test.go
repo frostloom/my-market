@@ -23,12 +23,15 @@ const allowedPrefix = "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 func TestImportBoundary_OnlyPkgProto(t *testing.T) {
 	// 测试 cwd = 本包目录，仓库根在 ../..。
 	root := filepath.Join("..", "..")
-	// 只扫 mall 侧根模块代码；ai-gateway 子目录（workspace 另一模块，
-	// 自身代码不受此边界约束）不在扫描根内。
+	// 只扫 mall 侧根模块代码。services/ai-gateway 子目录是 workspace 另一模块
+	// （R2.6 结构归位后位于 services/ 下），自身代码不受此边界约束——其 internal
+	// 规则由 Go 编译器强制，故遍历时显式跳过该子树。
 	roots := []string{
 		filepath.Join(root, "services"),
 		filepath.Join(root, "pkg"),
 	}
+	// 异模块子树根（walk 中按目录路径精确匹配，整目录剪枝）。
+	skipDir := filepath.Join(root, "services", "ai-gateway")
 
 	fset := token.NewFileSet()
 	scanned := 0
@@ -40,6 +43,10 @@ func TestImportBoundary_OnlyPkgProto(t *testing.T) {
 			if d.IsDir() {
 				name := d.Name()
 				if name == "testdata" || name == ".git" {
+					return fs.SkipDir
+				}
+				// services/ai-gateway = 独立 Go 模块（workspace 成员），不在守卫管辖区。
+				if path == skipDir {
 					return fs.SkipDir
 				}
 				return nil

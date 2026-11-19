@@ -1,0 +1,57 @@
+# 构建产物
+*.exe
+bin/
+
+# 前端（web/ 独立工程）：node_modules 与本地缓存不入库；
+# dist/ 必须入库（go:embed 需要），构建产物是部署物
+web/node_modules/
+web/.npm-cache/
+
+# 环境与本地配置
+.env
+.env.local
+
+# 编辑器/系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 测试产物
+coverage.out
+__pycache__/
+# eval/ 资产于 R2.6-T2 迁至仓库顶层 eval/ai-gateway/，其忽略规则移交根 .gitignore
+
+# 本地构建缓存（go build cache，数百 MB，可重建）
+.gocache/
+
+# 运行期日志
+logs/
+*.log
+
+# 本地调试/误产物
+/-o
+err.txt
+
+# 设计预览与截图（web/src 才是前端源，这些是本地生成的对照稿）
+web/preview/
+.dsh-vision-toolkit/
+
+# 公开数据集调研的原始下载（web/scripts/survey-datasets.mjs 可重新拉取，几十 MB）
+web/.probe/
+
+# Isolated Langfuse deployment secrets
+deploy/langfuse/.env
+deploy/langfuse/data/
+deploy/langfuse/.env.agent
+
+deploy/langfuse/.local-login.txt
+
+# 本地分支工作区
+/worktrees/
+
+# 本地临时工作区（一次性领取、私密计费证据、执行回执等，全部只留本地）
+/.tmp/
+
+# 设计工具本地产物（截图/对照稿）
+.hallmark/

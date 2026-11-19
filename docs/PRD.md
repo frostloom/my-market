@@ -306,8 +306,10 @@ my-market/
 │   │   ├── acceptance.md      # 各里程碑可执行验收清单
 │   │   └── adr/               # 架构决策记录（每条一页）
 │   └── plans/                 # 阶段任务拆解（superpowers 任务清单）
-├── ai-gateway/                # 整仓迁入，模块路径不变，eval/ 随迁
-├── services/                  # mall-bff / mall-goods / mall-order / seckill
+├── services/
+│   ├── ai-gateway/            # 整仓迁入（R2.6 结构归位到 services/），模块路径不变（eval/ 已于 R2.6-T2 提为顶层 eval/）
+│   └── mall-bff / mall-goods / mall-order / seckill   # 商城侧（根模块）
+├── eval/                      # 统一评测资产（顶层，R2.6-T2）：eval/ai-gateway/ 存量 + 后续 loadtest(R4)/e2e(R6) 按域分目录，规约见 eval/README.md
 ├── web/                       # 商城前端工程（Vue3+Vite+TS 双入口 mall-user/mall-admin，R6；构建产物 go:embed 进 mall-bff）
 ├── proto/                     # 商城侧 .proto（含 Credit/ActivateSubscription 扩展）
 ├── pkg/                       # 商城侧公共库（mallerr/mallpage 等）
@@ -326,7 +328,7 @@ my-market/
 
 ## 12. ai-gateway 迁移方案（已定）
 
-- **整仓迁入** `my-market/ai-gateway/`：全部源码、web/、docs/、scripts/、deploy/、**eval/ 全套（220M，含 langfuse 相关，评测在新仓继续）**；
+- **整仓迁入** `my-market/services/ai-gateway/`（R0 迁入根下，R2.6 结构归位至 services/）：全部源码、web/、docs/、scripts/、deploy/、**eval/ 全套（220M，含 langfuse 相关，评测在新仓继续）**；
 - **不迁**：`.git`（2.6G 历史留在旧仓）、logs/、.gocache/、worktrees/ 等运行产物；
 - Go 模块路径 `github.com/frostloom/ai-gateway` 不变——代码零改动即编译；
 - 旧 GitHub 仓**归档只读**（历史凭证），README 顶部指向 my-market；此后 gateway 的开发都在新仓目录内进行；

@@ -406,7 +406,7 @@ func tailStderr(buf *bytes.Buffer) string {
 // buildBillingBinary 构建 ai-gateway cmd/billing（go build 缓存热身后 <1s）。
 func buildBillingBinary(t *testing.T) string {
 	t.Helper()
-	aiDir, err := filepath.Abs(filepath.Join("..", "..", "ai-gateway"))
+	aiDir, err := filepath.Abs(filepath.Join("..", "..", "services", "ai-gateway"))
 	if err != nil {
 		t.Fatalf("resolve ai-gateway dir: %v", err)
 	}
