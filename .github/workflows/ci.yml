@@ -1,0 +1,149 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # 根模块（商城）：vet + 全部测试（含连 MySQL/Redis 的集成测试与真 billing 子进程用例）
+  mall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
+      MARKET_MYSQL_DSN: root:root@tcp(127.0.0.1:3307)/market?parseTime=true&loc=Local
+      CONTROL_PLANE_TOKEN: ci-control-token
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+        ports: ["3307:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      redis:
+        image: redis:7
+        ports: ["6381:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install mysql client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mysql-client
+      - name: Init schemas and seeds
+        run: |
+          mysql -h 127.0.0.1 -P 3307 -uroot -proot < services/ai-gateway/scripts/schema.sql
+          mysql -h 127.0.0.1 -P 3307 -uroot -proot < docs/spec/db-schema.sql
+          mysql -h 127.0.0.1 -P 3307 -uroot -proot < scripts/seed-plans.sql
+          mysql -h 127.0.0.1 -P 3307 -uroot -proot < scripts/seed-goods.sql
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./services/... ./pkg/... -count=1
+
+  # ai-gateway 模块：与旧仓 CI 同口径（AGENT_LIVE_JEV=0 + MySQL/Redis 服务；CGO=0 为门禁口径）
+  ai-gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: services/ai-gateway
+    env:
+      CGO_ENABLED: "0"
+      AGENT_LIVE_JEV: "0"
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+        ports: ["3307:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      redis:
+        image: redis:7
+        ports: ["6381:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/ai-gateway/go.mod
+          cache: true
+          cache-dependency-path: services/ai-gateway/go.sum
+      - name: Install mysql client and init schema
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq mysql-client
+          mysql -h 127.0.0.1 -P 3307 -uroot -proot < scripts/schema.sql
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./... -count=1
+
+  # 冻结证据跨平台字节保真（Windows 换行场景）+ 离线契约（与旧仓一致）
+  offline-evaluation:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/ai-gateway
+    env:
+      AGENT_LIVE_JEV: "0"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/ai-gateway/go.mod
+          cache: true
+          cache-dependency-path: services/ai-gateway/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Offline contracts and local script doubles only
+        run: python -m unittest discover -s scripts/tests
+      - name: Preserve historical evidence
+        run: |
+          python scripts/customer-service-contract.py verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/archive-intent-contract.py verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/summarize-offline-intent-audit.py verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/prepare-customer-fixtures.py verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify-task-definition-archive.py verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/prepare-runtime-customer-profiles.py verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/audit-historical-answer-evidence.py verify
+          exit $LASTEXITCODE
+
+  # ai-gateway web 前端契约校验（与旧仓一致）
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/ai-gateway/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/ai-gateway/web/package-lock.json
+      - name: verify
+        run: npm ci && npm run verify
