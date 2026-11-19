@@ -89,6 +89,7 @@ func TestMarkPaidTx_HappyPath_ThreeTablesConsistent(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
 
 	ord := createTestOrder(t, s, ctx, testTenantA, "pay-happy", 113, 1)
 
@@ -152,6 +153,7 @@ func TestMarkPaidTx_DuplicateCallbackDifferentAmount(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 115)
 
 	ord := createTestOrder(t, s, ctx, testTenantA, "pay-dup", 115, 1)
 
@@ -197,6 +199,7 @@ func TestMarkPaidTx_VerifyFail_StaysCreated(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 116)
 
 	ord := createTestOrder(t, s, ctx, testTenantA, "pay-verify", 116, 1)
 
@@ -249,6 +252,7 @@ func TestMarkPaidTx_AmountMismatchFailsPayment(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
 
 	ord := createTestOrder(t, s, ctx, testTenantA, "pay-mismatch", 113, 1)
 

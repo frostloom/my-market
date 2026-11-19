@@ -65,6 +65,7 @@ func TestRunFulfillmentOnce_ShipLinesToDone_ThenOrderFulfilled(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113, 114)
 
 	ord, err := s.CreateCartOrder(ctx, testTenantA, "ful-fill", []Line{
 		{GoodsID: 113, Qty: 1}, {GoodsID: 114, Qty: 1},
@@ -118,6 +119,7 @@ func TestRunFulfillmentOnce_CrashReplay(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
 
 	ord, err := s.CreateCartOrder(ctx, testTenantA, "ful-crash", []Line{{GoodsID: 113, Qty: 2}})
 	if err != nil {
@@ -170,6 +172,7 @@ func TestWorker_BackoffRetriesAndFails(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
 
 	// 注入故障：替换履约接缝（真实渠道接入前的故障演练口径）
 	s.shipLine = func(context.Context, fulfillmentTaskRow) error {
@@ -243,6 +246,7 @@ func TestWorker_PromoteSweepHealsCrashWindow(t *testing.T) {
 	s := openOrderTestStore(t)
 	ctx := context.Background()
 	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
 
 	ord := createTestOrder(t, s, ctx, testTenantA, "worker-sweep", 113, 1)
 	// 手动造崩溃窗口现场：订单 paid + 履约行全部 done（跳过 promote）
