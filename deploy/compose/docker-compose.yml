@@ -18,7 +18,7 @@
 #
 # 容器内互访一律走服务名 + 容器端口（mysql:3306 / redis:6379 / billing:9101 …），
 # 与宿主映射端口（3307/6381/29092）无关；各服务显式 LISTEN_HOST=0.0.0.0 才能被映射/互访
-# （代码默认 LISTEN_HOST=127.0.0.1，见 ai-gateway/internal/pkg/config.ListenAddr，容器里不设则全不通）。
+# （代码默认 LISTEN_HOST=127.0.0.1，见 services/ai-gateway/internal/pkg/config.ListenAddr，容器里不设则全不通）。
 name: my-market
 
 services:
