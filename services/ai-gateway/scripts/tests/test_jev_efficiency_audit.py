@@ -7,7 +7,7 @@ import unittest
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SPEC = importlib.util.spec_from_file_location('jev_efficiency_audit', ROOT / 'scripts/audit-jev-efficiency.py')
 audit = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit)

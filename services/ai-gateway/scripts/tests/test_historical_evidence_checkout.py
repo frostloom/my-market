@@ -6,17 +6,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+REPO = ROOT.parent.parent  # R2.6-T2: 仓库根（顶层 eval/ 所在）
 SUMMARIZE = ROOT / 'scripts/summarize-offline-intent-audit.py'
 
 # Working-tree bytes compared with locked hashes by the CI verify commands.
+# 路径为仓库根相对路径（R2.6-T2 后 eval/ 位于仓库顶层）。
 LOCKED_PATHS = (
-    'eval/paired-pilots/2026-10-17-jev-acceptance-v1/attempt-01/run.jsonl',
-    'eval/paired-pilots/2026-10-17-four-task-retest-v1/attempt-01/run.jsonl',
-    'eval/intent-suite/manifest.json',
-    'eval/intent-suite/balance.json',
-    'web/scripts/gen-intent-suite.mjs',
-    'scripts/customer-service-contract.py',
-    'scripts/summarize-offline-intent-audit.py',
+    'eval/ai-gateway/paired-pilots/2026-10-17-jev-acceptance-v1/attempt-01/run.jsonl',
+    'eval/ai-gateway/paired-pilots/2026-10-17-four-task-retest-v1/attempt-01/run.jsonl',
+    'eval/ai-gateway/intent-suite/manifest.json',
+    'eval/ai-gateway/intent-suite/balance.json',
+    'services/ai-gateway/web/scripts/gen-intent-suite.mjs',
+    'services/ai-gateway/scripts/customer-service-contract.py',
+    'services/ai-gateway/scripts/summarize-offline-intent-audit.py',
 )
 
 
@@ -31,7 +33,7 @@ class HistoricalEvidenceCheckoutTests(unittest.TestCase):
     def test_locked_sources_are_not_text_converted(self):
         completed = subprocess.run(
             ['git', 'check-attr', 'text', '--', *LOCKED_PATHS],
-            cwd=ROOT, check=True, capture_output=True, text=True)
+            cwd=REPO, check=True, capture_output=True, text=True)
         for line in completed.stdout.splitlines():
             path, _, value = line.split(': ')
             self.assertEqual(value, 'unset', path)
@@ -40,8 +42,8 @@ class HistoricalEvidenceCheckoutTests(unittest.TestCase):
         tool = load_summarize()
         relative = r'eval\experiments\2026-10-08-jev-fast-path\raw\revised-full-nojev\intent.json.gz'
         path = tool.evidence_path(relative)
-        self.assertEqual(path, tool.ROOT / 'eval/experiments/2026-10-08-jev-fast-path/raw/revised-full-nojev/intent.json.gz')
-        self.assertTrue(path.is_relative_to(tool.ROOT))
+        self.assertEqual(path, tool.EVAL / 'experiments/2026-10-08-jev-fast-path/raw/revised-full-nojev/intent.json.gz')
+        self.assertTrue(path.is_relative_to(tool.EVAL) or path.is_relative_to(tool.ROOT))
 
 
 if __name__ == '__main__':

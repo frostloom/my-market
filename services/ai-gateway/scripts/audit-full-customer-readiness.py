@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 CLAIM_SHA = 'f09de5bb9ab4147f140f54db7a25c5f419b7a4e48137d63c1782ea7c38d768b3'
 PRICING = EVAL / 'paired-pilots/2026-10-27-receiver-repeated-entry/pricing.json'
 PILOT_KEYS = frozenset([
@@ -96,7 +96,12 @@ def audit(root, probe, reservation):
                 'Consumed reservation snapshot differs: ' + key)
     price_raw = (root / PRICING).read_bytes()
     price_manifest = json.loads((root / PRICING.parent / 'manifest.json').read_bytes())
-    require(price_manifest['files'].get(str(PRICING)) == sha(price_raw), 'Archived pricing binding differs')
+    # 冻结 manifest 的 files 键为 R2.6 前布局相对路径（eval/...）；按该标签比对绑定，
+    # 数据本身一个字节不改。
+    frozen_label = 'eval/' + str(PRICING.relative_to(EVAL))
+    require(price_manifest['files'].get(frozen_label) == sha(price_raw) or
+            price_manifest['files'].get(str(PRICING)) == sha(price_raw),
+            'Archived pricing binding differs')
     price = json.loads(price_raw)
     model, jev = price['deepseek'], price['typesafe']
     model_per_attempt = (model['max_input'] * model['peak_input_micro_cny_per_million']

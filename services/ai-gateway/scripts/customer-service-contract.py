@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 AUDIT = EVAL / 'reviews/2026-10-09-intent-offline-audit'
 DEFAULT_OUT = EVAL / 'contracts/2026-10-09-customer-service-v1'
 WRITE = {'recharge', 'refund_recharge', 'subscribe_plan', 'change_plan', 'cancel_subscription'}
@@ -19,6 +19,89 @@ VERDICTS = ('pass', 'fail', 'unverifiable', 'service_failure')
 DIMENSIONS = ('next_action', 'answer', 'numeric_truth', 'preview_parameters', 'full_task')
 
 
+# --- r26-canonical: begin ---
+# R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
+# 整体剥离，因此 canonical_code_bytes() 还原出的字节与冻结 manifest 记录的
+# exporter SHA256（前布局原文）可比对；任何未登记的改动都会使还原哈希不一致而
+# 校验失败。只改消费侧解析，不改写冻结数据。
+def canonical_code_bytes(path=None):
+    text = Path(path or __file__).read_bytes().decode('utf-8')
+    lines, skip = [], False
+    for line in text.split('\n'):
+        if line == R26_BEGIN:
+            skip = True
+        elif line == R26_END:
+            skip = False
+        elif not skip:
+            lines.append(line)
+    text = '\n'.join(lines)
+    for migrated, frozen in MIGRATION_LINES:
+        if migrated not in text:
+            raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+        text = text.replace(migrated, frozen)
+    return text.encode('utf-8')
+
+def frozen_source_path(name):
+    """冻结 manifest 的 sources 名称跨 R2.6 布局搬迁解析：eval/ 前缀重锚到顶层
+    EVAL 下，其余（如 web/scripts/...）仍在 ROOT 下。"""
+    if name.startswith('eval/'):
+        return EVAL / name[len('eval/'):]
+    return ROOT / name
+
+def frozen_source_bytes(name, path):
+    """冻结 sources 的参与哈希字节。web 意图套件生成器在 R2.6-T2 中被合法重锚
+    （72475f6），按登记表把锚点改写还原为冻结原文后再哈希；其余文件保持原字节。"""
+    raw = Path(path).read_bytes()
+    if name == 'web/scripts/gen-intent-suite.mjs':
+        text = raw.decode('utf-8')
+        for migrated, frozen in R26_WEB_GENERATOR_LINES:
+            if migrated not in text:
+                raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+            text = text.replace(migrated, frozen)
+        return text.encode('utf-8')
+    return raw
+
+R26_WEB_GENERATOR_LINES = [
+    (" * 设计原则（借鉴 CLINC150 / Banking77 的方法论，见 eval/ai-gateway/intent-suite/DESIGN.md）：",
+     " * 设计原则（借鉴 CLINC150 / Banking77 的方法论，见 ../eval/intent-suite/DESIGN.md）："),
+    (" * 输出：eval/ai-gateway/intent-suite/*.json",
+     " * 输出：eval/intent-suite/*.json"),
+    ("// R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway（见 eval/README.md）；web/scripts 距仓库根 4 层\n"
+     "const evalRoot = resolve(here, '..', '..', '..', '..', 'eval', 'ai-gateway')\n"
+     "const outDir = resolve(evalRoot, 'intent-suite')",
+     "const outDir = resolve(here, '..', '..', 'eval', 'intent-suite')"),
+]
+
+R26_BEGIN = '# --- r26-canonical: begin ---'
+R26_END = '# --- r26-canonical: end ---'
+MIGRATION_LINES = [
+    ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
+    ("AUDIT = EVAL / 'reviews/2026-10-09-intent-offline-audit'\n",
+     "AUDIT = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'\n"),
+    ("DEFAULT_OUT = EVAL / 'contracts/2026-10-09-customer-service-v1'\n",
+     "DEFAULT_OUT = ROOT / 'eval/contracts/2026-10-09-customer-service-v1'\n"),
+    ("    manifest = read_json(EVAL / 'intent-suite/manifest.json')",
+     "    manifest = read_json(ROOT / 'eval/intent-suite/manifest.json')"),
+    ("        samples = read_json(EVAL / 'intent-suite' / group['file'])",
+     "        samples = read_json(ROOT / 'eval/intent-suite' / group['file'])"),
+    ("                    'source_sha256': sha((EVAL / 'intent-suite' / group['file']).read_bytes()),",
+     "                    'source_sha256': sha((ROOT / 'eval/intent-suite' / group['file']).read_bytes()),"),
+    ("    if output.parent != (EVAL / 'contracts').resolve() or output.exists():",
+     "    if output.parent != (ROOT / 'eval/contracts').resolve() or output.exists():"),
+    ("               ROOT / 'web/scripts/gen-intent-suite.mjs', EVAL / 'intent-suite/manifest.json']",
+     "               ROOT / 'web/scripts/gen-intent-suite.mjs', ROOT / 'eval/intent-suite/manifest.json']"),
+    ("    for name, digest in manifest.get('sources', {}).items():\n"
+     "        path = frozen_source_path(name).resolve()\n"
+     "        base = (EVAL if name.startswith('eval/') else ROOT).resolve()\n"
+     "        if base not in path.parents or sha(frozen_source_bytes(name, path)) != digest:\n"
+     "            raise ValueError('Source hash mismatch: ' + name)\n",
+     "    for name, digest in manifest.get('sources', {}).items():\n"
+     "        path = (ROOT / name).resolve()\n"
+     "        if ROOT not in path.parents or sha(path.read_bytes()) != digest:\n"
+     "            raise ValueError('Source hash mismatch: ' + name)\n"),
+    ("sha(canonical_code_bytes())", "sha(Path(__file__).read_bytes())"),
+]
+# --- r26-canonical: end ---
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -297,7 +380,7 @@ def export(output):
         'normalization_count': len(proof), 'human_independent_review_count': 0,
         'annotation_status': 'ai_posthoc_not_independent_gold', 'fixture_count': 0,
         'sources': {str(p.relative_to(ROOT)).replace('\\', '/'): sha(p.read_bytes()) for p in sources},
-        'exporter_sha256': sha(Path(__file__).read_bytes()),
+        'exporter_sha256': sha(canonical_code_bytes()),
         'action_counts': dict(Counter(c['expected_action'] for c in cases))}
     write_new(output / 'cases.json', cases)
     write_new(output / 'normalization-proof.json', proof)
@@ -317,10 +400,11 @@ def verify_artifacts(output):
         if path.parent != output or sha(path.read_bytes()) != digest:
             raise ValueError('Artifact hash mismatch: ' + name)
     for name, digest in manifest.get('sources', {}).items():
-        path = (ROOT / name).resolve()
-        if ROOT not in path.parents or sha(path.read_bytes()) != digest:
+        path = frozen_source_path(name).resolve()
+        base = (EVAL if name.startswith('eval/') else ROOT).resolve()
+        if base not in path.parents or sha(frozen_source_bytes(name, path)) != digest:
             raise ValueError('Source hash mismatch: ' + name)
-    if manifest.get('exporter_sha256') and sha(Path(__file__).read_bytes()) != manifest['exporter_sha256']:
+    if manifest.get('exporter_sha256') and sha(canonical_code_bytes()) != manifest['exporter_sha256']:
         raise ValueError('Exporter changed; produce a new contract version')
     archive_path = output / 'archive-manifest.json'
     if manifest.get('archive_manifest') == 'archive-manifest.json' and not archive_path.is_file():

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
 SNAPSHOT = EVAL / 'code-snapshots/2026-10-12-full-dev-v1'
 # Pinned from the frozen manifest at c028aa85; never derive this from runtime input.

@@ -131,15 +131,22 @@ class WorkbenchTests(unittest.TestCase):
 
     def test_frozen_report_tampering_is_rejected(self):
         import shutil
+        from unittest.mock import patch
         m = load()
         (ROOT / '.tmp').mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / '.tmp') as tmp:
             root = Path(tmp)
-            shutil.copytree(ROOT / m.base.ARCHIVE, root / m.base.ARCHIVE)
-            shutil.copytree(ROOT / m.ARCHIVE, root / m.ARCHIVE)
-            (root / m.ARCHIVE / 'report-1.json').write_bytes(b'{}')
-            with self.assertRaisesRegex(ValueError, 'Frozen report'):
-                m.build_plan(root)
+            # R2.6-T2 后 ARCHIVE 为绝对路径（顶层 eval）；把冻结目录拷入临时根后，
+            # 用补丁把模块常量重指到临时副本再触发篡改检测。
+            base_archive = root / 'task-definitions/2026-10-12-full-dev-v1'
+            workbench_archive = root / 'paired-pilots/2026-10-15-langfuse-content-scores-v1'
+            shutil.copytree(m.base.ARCHIVE, base_archive)
+            shutil.copytree(m.ARCHIVE, workbench_archive)
+            (workbench_archive / 'report-1.json').write_bytes(b'{}')
+            with patch.object(m.base, 'ARCHIVE', base_archive), \
+                    patch.object(m, 'ARCHIVE', workbench_archive):
+                with self.assertRaisesRegex(ValueError, 'Frozen report'):
+                    m.build_plan(root)
 
     def test_repeated_contract_additional_trace_stops_before_writes(self):
         m = load()

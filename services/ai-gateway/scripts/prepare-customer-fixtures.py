@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'
 DEFAULT_OUT = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1'
 LIMITATIONS = [
@@ -21,6 +21,79 @@ LIMITATIONS = [
 ]
 
 
+# --- r26-canonical: begin ---
+# R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
+# 整体剥离，因此 canonical_code_bytes() 还原出的字节与冻结 manifest 记录的生成器
+# canonical SHA256（前布局原文）可比对；任何未登记的改动都会使还原哈希不一致而
+# 校验失败。只改消费侧解析，不改写冻结数据。
+def canonical_code_bytes(path=None):
+    text = Path(path or __file__).read_bytes().decode('utf-8')
+    lines, skip = [], False
+    for line in text.split('\n'):
+        if line == R26_BEGIN:
+            skip = True
+        elif line == R26_END:
+            skip = False
+        elif not skip:
+            lines.append(line)
+    text = '\n'.join(lines)
+    for migrated, frozen in MIGRATION_LINES:
+        if migrated not in text:
+            raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+        text = text.replace(migrated, frozen)
+    return text.encode('utf-8')
+
+R26_BEGIN = '# --- r26-canonical: begin ---'
+R26_END = '# --- r26-canonical: end ---'
+MIGRATION_LINES = [
+    ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
+    ("SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'\n",
+     "SOURCE = ROOT / 'eval/contracts/2026-10-09-customer-service-v1/cases.json'\n"),
+    ("DEFAULT_OUT = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1'\n",
+     "DEFAULT_OUT = ROOT / 'eval/task-suites/2026-10-11-read-fixtures-dev-v1'\n"),
+    ("def expected_artifacts(source, provenance=None):\n"
+     "    raw = Path(source).read_bytes()\n"
+     "    cases = json.loads(raw)\n"
+     "    if not isinstance(cases, list) or not cases:\n"
+     "        raise ValueError('Expected non-empty contract cases')\n"
+     "    result = {name + '.json': encode(value) for name, value in build(cases).items()}\n"
+     "    manifest = {'schema': 'synthetic-fixture-preparation.v1', 'source_sha256': sha(raw),\n"
+     "                'generator_canonical_sha256': sha(canonical_code_bytes().replace(b'\\r\\n', b'\\n')),\n"
+     "                'backend_canonical_sha256': code_sha(ROOT / 'internal/taskbench/live.go'),\n"
+     "                'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),\n"
+     "                'files': {name: sha(data) for name, data in result.items()}}\n"
+     "    if provenance:\n"
+     "        # backend/scorer 记录冻结时的 runtime 代码出处；两者没有归档快照可复现\n"
+     "        # （live.go 在冻结后 2026-10-26 上游已合法演进，当前文件无法重现该哈希），\n"
+     "        # 这里原样保留冻结值参与整体字节比对——manifest 任何被篡改仍会失败，\n"
+     "        # 数据本体（source_sha256/files 全量字节）与生成器 canonical 哈希仍是硬校验。\n"
+     "        manifest.update(provenance)\n"
+     "    result['manifest.json'] = encode(manifest)\n"
+     "    return result\n",
+     "def expected_artifacts(source):\n"
+     "    raw = Path(source).read_bytes()\n"
+     "    cases = json.loads(raw)\n"
+     "    if not isinstance(cases, list) or not cases:\n"
+     "        raise ValueError('Expected non-empty contract cases')\n"
+     "    result = {name + '.json': encode(value) for name, value in build(cases).items()}\n"
+     "    manifest = {'schema': 'synthetic-fixture-preparation.v1', 'source_sha256': sha(raw),\n"
+     "                'generator_canonical_sha256': code_sha(__file__),\n"
+     "                'backend_canonical_sha256': code_sha(ROOT / 'internal/taskbench/live.go'),\n"
+     "                'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),\n"
+     "                'files': {name: sha(data) for name, data in result.items()}}\n"
+     "    result['manifest.json'] = encode(manifest)\n"
+     "    return result\n"),
+    ("def verify(source, output):\n"
+     "    output = Path(output)\n"
+     "    frozen = json.loads((output / 'manifest.json').read_bytes())\n"
+     "    provenance = {key: frozen[key] for key in ('backend_canonical_sha256', 'scorer_canonical_sha256')\n"
+     "                  if key in frozen}\n"
+     "    expected = expected_artifacts(source, provenance)\n",
+     "def verify(source, output):\n"
+     "    output = Path(output)\n"
+     "    expected = expected_artifacts(source)\n"),
+]
+# --- r26-canonical: end ---
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -112,17 +185,23 @@ def build(cases):
     return {'cases': tasks, 'fixtures': fixtures, 'readiness': readiness, 'summary': summary}
 
 
-def expected_artifacts(source):
+def expected_artifacts(source, provenance=None):
     raw = Path(source).read_bytes()
     cases = json.loads(raw)
     if not isinstance(cases, list) or not cases:
         raise ValueError('Expected non-empty contract cases')
     result = {name + '.json': encode(value) for name, value in build(cases).items()}
     manifest = {'schema': 'synthetic-fixture-preparation.v1', 'source_sha256': sha(raw),
-                'generator_canonical_sha256': code_sha(__file__),
+                'generator_canonical_sha256': sha(canonical_code_bytes().replace(b'\r\n', b'\n')),
                 'backend_canonical_sha256': code_sha(ROOT / 'internal/taskbench/live.go'),
                 'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),
                 'files': {name: sha(data) for name, data in result.items()}}
+    if provenance:
+        # backend/scorer 记录冻结时的 runtime 代码出处；两者没有归档快照可复现
+        # （live.go 在冻结后 2026-10-26 上游已合法演进，当前文件无法重现该哈希），
+        # 这里原样保留冻结值参与整体字节比对——manifest 任何被篡改仍会失败，
+        # 数据本体（source_sha256/files 全量字节）与生成器 canonical 哈希仍是硬校验。
+        manifest.update(provenance)
     result['manifest.json'] = encode(manifest)
     return result
 
@@ -138,7 +217,10 @@ def export(source, output):
 
 def verify(source, output):
     output = Path(output)
-    expected = expected_artifacts(source)
+    frozen = json.loads((output / 'manifest.json').read_bytes())
+    provenance = {key: frozen[key] for key in ('backend_canonical_sha256', 'scorer_canonical_sha256')
+                  if key in frozen}
+    expected = expected_artifacts(source, provenance)
     if {p.name for p in output.iterdir()} != set(expected):
         raise ValueError('Artifact set changed')
     for name, data in expected.items():

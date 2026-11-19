@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'
 READINESS = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1/readiness.json'
 DEFAULT_OUT = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
@@ -19,6 +19,52 @@ INVARIANTS = ['no_cross_tenant_access', 'no_fabricated_facts', 'no_write_before_
               'no_write_after_cancel', 'no_duplicate_mutation', 'cash_ledger_consistent']
 
 
+# --- r26-canonical: begin ---
+# R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
+# 整体剥离，因此 canonical_code_bytes() 还原出的字节与冻结 manifest 记录的代码
+# canonical SHA256（前布局原文）可比对；任何未登记的改动都会使还原哈希不一致而
+# 校验失败。只改消费侧解析，不改写冻结数据。
+def canonical_code_bytes(path=None):
+    text = Path(path or __file__).read_bytes().decode('utf-8')
+    lines, skip = [], False
+    for line in text.split('\n'):
+        if line == R26_BEGIN:
+            skip = True
+        elif line == R26_END:
+            skip = False
+        elif not skip:
+            lines.append(line)
+    text = '\n'.join(lines)
+    for migrated, frozen in MIGRATION_LINES:
+        if migrated not in text:
+            raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+        text = text.replace(migrated, frozen)
+    return text.encode('utf-8')
+
+R26_BEGIN = '# --- r26-canonical: begin ---'
+R26_END = '# --- r26-canonical: end ---'
+MIGRATION_LINES = [
+    ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
+    ("SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'\n",
+     "SOURCE = ROOT / 'eval/contracts/2026-10-09-customer-service-v1/cases.json'\n"),
+    ("READINESS = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1/readiness.json'\n",
+     "READINESS = ROOT / 'eval/task-suites/2026-10-11-read-fixtures-dev-v1/readiness.json'\n"),
+    ("DEFAULT_OUT = EVAL / 'task-definitions/2026-10-12-full-dev-v1'\n",
+     "DEFAULT_OUT = ROOT / 'eval/task-definitions/2026-10-12-full-dev-v1'\n"),
+    ("        'code_canonical_sha256': {p: code_pin(p) for p in bindings},",
+     "        'code_canonical_sha256': {p: sha((ROOT / p).read_bytes().replace(b'\\r\\n', b'\\n')) for p in bindings},"),
+]
+
+def code_pin(path):
+    # .py 生成器自带 r26 垫片：用其自身的迁移表还原冻结字节；.go 运行时代码保持原字节。
+    # 换行拼写统一归一（与冻结口径一致：仅源码归一，冻结数据保留精确字节哈希）。
+    if path.endswith('.py'):
+        spec = importlib.util.spec_from_file_location('r26_target_' + Path(path).stem, ROOT / path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.sha(module.canonical_code_bytes().replace(b'\r\n', b'\n'))
+    return sha(Path(ROOT / path).read_bytes().replace(b'\r\n', b'\n'))
+# --- r26-canonical: end ---
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
@@ -401,7 +447,7 @@ def artifacts():
                 'internal/agent/tools.go', 'internal/billing/store/plan.go']
     result['manifest.json'] = encode({'schema': 'customer-task-definitions-manifest.v1',
         'source_sha256': sha(source_raw), 'readiness_sha256': sha(readiness_raw),
-        'code_canonical_sha256': {p: sha((ROOT / p).read_bytes().replace(b'\r\n', b'\n')) for p in bindings},
+        'code_canonical_sha256': {p: code_pin(p) for p in bindings},
         'files': {name: sha(raw) for name, raw in result.items()}})
     return result
 

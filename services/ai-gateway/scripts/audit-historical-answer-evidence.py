@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'reviews/2026-10-09-intent-offline-audit'
 OUT = EVAL / 'reviews/2026-10-13-answer-evidence-v1'
 ARMS = ('nojev', 'hint', 'fast')
@@ -38,6 +38,62 @@ QUANTITY = re.compile(
     r'\d{4}[-/]\d{1,2}[-/]\d{1,2})', re.IGNORECASE)
 
 
+# --- r26-canonical: begin ---
+# R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
+# 整体剥离，因此 canonical_code_bytes() 还原出的字节与冻结 archive-manifest 记录
+# 的生成器 SHA256（前布局原文）可比对；任何未登记的改动都会使还原哈希不一致而
+# 校验失败。只改消费侧解析，不改写冻结数据。
+def canonical_code_bytes(path=None):
+    text = Path(path or __file__).read_bytes().decode('utf-8')
+    lines, skip = [], False
+    for line in text.split('\n'):
+        if line == R26_BEGIN:
+            skip = True
+        elif line == R26_END:
+            skip = False
+        elif not skip:
+            lines.append(line)
+    text = '\n'.join(lines)
+    for migrated, frozen in MIGRATION_LINES:
+        if migrated not in text:
+            raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+        text = text.replace(migrated, frozen)
+    return text.encode('utf-8')
+
+def evidence_path(relative):
+    """冻结 sources.json 记录 R2.6 前布局路径（eval/... 相对 ROOT，历史上有 Windows
+    分隔符）；eval/ 前缀重锚到顶层 EVAL 下，其余仍在 ROOT 下。"""
+    relative = str(relative).replace('\\', '/')
+    if relative.startswith('eval/'):
+        return EVAL / relative[len('eval/'):]
+    return ROOT / relative
+
+def frozen_source_label(path):
+    """保持冻结 sources.json 的 frozen_source_directory 标签（前布局形式）逐字节稳定。"""
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return 'eval/' + path.relative_to(EVAL).as_posix()
+
+R26_BEGIN = '# --- r26-canonical: begin ---'
+R26_END = '# --- r26-canonical: end ---'
+MIGRATION_LINES = [
+    ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
+    ("SOURCE = EVAL / 'reviews/2026-10-09-intent-offline-audit'\n",
+     "SOURCE = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'\n"),
+    ("OUT = EVAL / 'reviews/2026-10-13-answer-evidence-v1'\n",
+     "OUT = ROOT / 'eval/reviews/2026-10-13-answer-evidence-v1'\n"),
+    ("        original = evidence_path(sources[arm]['path']).resolve()\n"
+     "        require(original.is_relative_to(ROOT.resolve()) or original.is_relative_to(EVAL.resolve()),\n"
+     "                'Evidence path escapes roots')\n"
+     "        require(original.read_bytes() == raw, 'Original source bytes changed')\n",
+     "        original = safe_path(ROOT, sources[arm]['path'])\n"
+     "        require(original.read_bytes() == raw, 'Original source bytes changed')\n"),
+    ("    return rows, {'frozen_source_directory': frozen_source_label(SOURCE),",
+     "    return rows, {'frozen_source_directory': SOURCE.relative_to(ROOT).as_posix(),"),
+    ("sha(canonical_code_bytes())", "sha(Path(__file__).read_bytes())"),
+]
+# --- r26-canonical: end ---
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -103,7 +159,9 @@ def load_sources(source=SOURCE):
         plain = gzip.decompress(raw)
         require(sha(raw) == sources[arm]['compressed_sha256'] and
                 sha(plain) == sources[arm]['original_sha256'], 'Compressed/original source hash')
-        original = safe_path(ROOT, sources[arm]['path'])
+        original = evidence_path(sources[arm]['path']).resolve()
+        require(original.is_relative_to(ROOT.resolve()) or original.is_relative_to(EVAL.resolve()),
+                'Evidence path escapes roots')
         require(original.read_bytes() == raw, 'Original source bytes changed')
         report = json.loads(plain)
         predictions[arm] = index_predictions(report['Preds'] + report['AdvPreds'], definitions)
@@ -120,7 +178,7 @@ def load_sources(source=SOURCE):
             verdict = row['review']['arms'][arm]
             require(not verdict['numeric_truth_verified'] and not verdict['full_task_verified'],
                     'Unexpected historical authority claim')
-    return rows, {'frozen_source_directory': SOURCE.relative_to(ROOT).as_posix(),
+    return rows, {'frozen_source_directory': frozen_source_label(SOURCE),
                   'pinned_files_sha256': PINNED, 'original_raw_sources': sources}
 
 
@@ -190,7 +248,7 @@ def build(out=OUT):
         # Exclusive creation also protects against a competing writer.
         with (out / name).open('xb') as target:
             target.write(encoded(value))
-    manifest = {'generator_sha256': sha(Path(__file__).read_bytes()),
+    manifest = {'generator_sha256': sha(canonical_code_bytes()),
                 'files': {name: sha(encoded(value)) for name, value in values.items()}}
     with (out / 'archive-manifest.json').open('xb') as target:
         target.write(encoded(manifest))
@@ -200,7 +258,7 @@ def build(out=OUT):
 def verify(out=OUT):
     expected = products()
     manifest = read(out / 'archive-manifest.json')
-    require(manifest['generator_sha256'] == sha(Path(__file__).read_bytes()), 'Generator changed')
+    require(manifest['generator_sha256'] == sha(canonical_code_bytes()), 'Generator changed')
     require(set(manifest['files']) == set(expected), 'Output manifest paths changed')
     actual_files = {p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()}
     require(actual_files == set(expected) | {'archive-manifest.json'}, 'Unexpected/missing output files')

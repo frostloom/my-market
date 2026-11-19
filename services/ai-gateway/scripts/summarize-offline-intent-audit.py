@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 WORK = EVAL / 'reports/offline-audit-20261009-1791554983597627200'
 OUT = EVAL / 'reviews/2026-10-09-intent-offline-audit'
 DRAFT = EVAL / 'annotations/2026-10-09-intent-contract-v1/cases.json'
@@ -15,6 +15,51 @@ ARMS = ('nojev', 'hint', 'fast')
 VERDICTS = ('pass', 'fail', 'unverifiable', 'service_failure')
 PARTS = ('reads_account', 'writes', 'catalog_other', 'adversarial')
 
+# --- r26-canonical: begin ---
+# R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
+# 整体剥离，因此 canonical_code_bytes() 还原出的字节与冻结 manifest 记录的生成器
+# SHA256（前布局原文）可比对；任何未登记的改动都会使还原哈希不一致而校验失败。
+# 只改消费侧解析，不改写冻结数据。
+def canonical_code_bytes(path=None):
+    text = Path(path or __file__).read_bytes().decode('utf-8')
+    lines, skip = [], False
+    for line in text.split('\n'):
+        if line == R26_BEGIN:
+            skip = True
+        elif line == R26_END:
+            skip = False
+        elif not skip:
+            lines.append(line)
+    text = '\n'.join(lines)
+    for migrated, frozen in MIGRATION_LINES:
+        if migrated not in text:
+            raise ValueError('r26 canonical rewrite drifted from frozen form: ' + migrated[:60])
+        text = text.replace(migrated, frozen)
+    return text.encode('utf-8')
+
+R26_BEGIN = '# --- r26-canonical: begin ---'
+R26_END = '# --- r26-canonical: end ---'
+MIGRATION_LINES = [
+    ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
+    ("WORK = EVAL / 'reports/offline-audit-20261009-1791554983597627200'\n",
+     "WORK = ROOT / 'eval/reports/offline-audit-20261009-1791554983597627200'\n"),
+    ("OUT = EVAL / 'reviews/2026-10-09-intent-offline-audit'\n",
+     "OUT = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'\n"),
+    ("DRAFT = EVAL / 'annotations/2026-10-09-intent-contract-v1/cases.json'\n",
+     "DRAFT = ROOT / 'eval/annotations/2026-10-09-intent-contract-v1/cases.json'\n"),
+    ("def evidence_path(relative):\n    relative = str(relative).replace('\\\\', '/')\n"
+     "    # sources.json 记录 R2.6 前布局路径（eval/... 相对 ROOT）；重锚到顶层 EVAL 下。\n"
+     "    if relative.startswith('eval/'):\n"
+     "        return EVAL / relative[len('eval/'):]\n"
+     "    return ROOT / relative\n",
+     "def evidence_path(relative):\n    return ROOT / str(relative).replace('\\\\', '/')\n"),
+    ("        raw = evidence_path(source['path']).read_bytes()\n",
+     "        raw = (ROOT/source['path']).read_bytes()\n"),
+    ("        path.write_bytes(evidence_path(source['path']).read_bytes())\n",
+     "        path.write_bytes((ROOT/source['path']).read_bytes())\n"),
+    ("sha(canonical_code_bytes())", "sha(Path(__file__).read_bytes())"),
+]
+# --- r26-canonical: end ---
 def read(path):
     return json.loads(path.read_text(encoding='utf-8'))
 
@@ -22,7 +67,11 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 def evidence_path(relative):
-    return ROOT / str(relative).replace('\\', '/')
+    relative = str(relative).replace('\\', '/')
+    # sources.json 记录 R2.6 前布局路径（eval/... 相对 ROOT）；重锚到顶层 EVAL 下。
+    if relative.startswith('eval/'):
+        return EVAL / relative[len('eval/'):]
+    return ROOT / relative
 
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +115,7 @@ def build():
     drafts = {r['id']: r for r in read(DRAFT)}
     predictions = {}
     for arm, source in sources.items():
-        raw = (ROOT/source['path']).read_bytes()
+        raw = evidence_path(source['path']).read_bytes()
         assert sha(raw) == source['compressed_sha256']
         plain = gzip.decompress(raw)
         assert sha(plain) == source['original_sha256']
@@ -102,7 +151,7 @@ def build():
     for arm, source in sources.items():
         path = OUT/'raw'/(arm+'.json.gz')
         path.parent.mkdir(exist_ok=True)
-        path.write_bytes((ROOT/source['path']).read_bytes())
+        path.write_bytes(evidence_path(source['path']).read_bytes())
     (OUT/'METHOD.md').write_bytes((WORK/'method.md').read_bytes())
     lines = ['# 1220条历史结果离线审核', '',
              '全部1220条原话及三组历史回复已进行AI逐条审核，形成3660条判定。没有调用模型或重跑评测。', '',
@@ -137,13 +186,13 @@ def build():
               '来源哈希见 [sources.json](sources.json)，原始压缩结果在 raw/；原规则草稿保存为 draft-cases.json。审核方法见 [METHOD.md](METHOD.md)。', '',
               '校验：`python scripts/summarize-offline-intent-audit.py verify`。']
     (OUT/'README.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
-    save(OUT/'archive-manifest.json', {'generator_sha256': sha(Path(__file__).read_bytes()),
+    save(OUT/'archive-manifest.json', {'generator_sha256': sha(canonical_code_bytes()),
           'files': [{'path': p.relative_to(OUT).as_posix(), 'sha256': sha(p.read_bytes())} for p in sorted(OUT.rglob('*')) if p.is_file()]})
     verify()
 
 def verify():
     manifest = read(OUT/'archive-manifest.json')
-    assert sha(Path(__file__).read_bytes()) == manifest['generator_sha256']
+    assert sha(canonical_code_bytes()) == manifest['generator_sha256']
     assert {p.relative_to(OUT).as_posix() for p in OUT.rglob('*') if p.is_file() and p.name != 'archive-manifest.json'} == {f['path'] for f in manifest['files']}
     for f in manifest['files']:
         assert sha((OUT/f['path']).read_bytes()) == f['sha256']

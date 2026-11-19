@@ -9,7 +9,7 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 ARCHIVE = EVAL / 'paired-pilots/2026-10-15-langfuse-content-scores-v1'
 NAME = '客服开发任务-1220-v1'
 DASH = '客服本机替身验收-v1（非真实模型成绩）'

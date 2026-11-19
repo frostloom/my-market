@@ -84,8 +84,8 @@ class BehaviorReviewTests(unittest.TestCase):
 
     def test_frozen_manifest_exceptions_and_all_raw_records_are_preserved(self):
         reviewer = load_reviewer()
-        root = SCRIPT.parent.parent
-        manifest_path = root / "eval/behavior-review/slot-annotations-v1.json"
+        root = SCRIPT.parent.parent.parent.parent / "eval" / "ai-gateway"  # R2.6-T2: 顶层评测资产
+        manifest_path = root / "behavior-review/slot-annotations-v1.json"
         if not manifest_path.exists():
             self.skipTest("companion manifest not authored yet")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -100,7 +100,7 @@ class BehaviorReviewTests(unittest.TestCase):
         self.assertEqual(annotations["change_plan-073"]["expected_behavior"], "review")
         for source in manifest["source_reports"]:
             version = "v1" if "/baseline/" in source["path"] else "v2"
-            frozen = root / "eval/baselines/2026-09-29-v1-v2" / version / (Path(source["path"]).name + ".gz")
+            frozen = root / "baselines/2026-09-29-v1-v2" / version / (Path(source["path"]).name + ".gz")
             raw = gzip.decompress(frozen.read_bytes())
             self.assertEqual(hashlib.sha256(raw).hexdigest(), source["sha256"])
             report = json.loads(raw.decode("utf-8"))
@@ -154,10 +154,10 @@ class BehaviorReviewTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "original")
 
     def test_gzip_cli_uses_original_json_digest_and_same_output_names(self):
-        root = SCRIPT.parent.parent
-        manifest = root / "eval/behavior-review/slot-annotations-v1.json"
-        sources = [root / "eval/baselines/2026-09-29-v1-v2/v1/intent-20260929-222256.394.json.gz",
-                   root / "eval/baselines/2026-09-29-v1-v2/v2/intent-20260930-001406.875.json.gz"]
+        root = SCRIPT.parent.parent.parent.parent / "eval" / "ai-gateway"  # R2.6-T2: 顶层评测资产
+        manifest = root / "behavior-review/slot-annotations-v1.json"
+        sources = [root / "baselines/2026-09-29-v1-v2/v1/intent-20260929-222256.394.json.gz",
+                   root / "baselines/2026-09-29-v1-v2/v2/intent-20260930-001406.875.json.gz"]
         with tempfile.TemporaryDirectory(dir=SCRIPT.parent / "tests") as td:
             output = Path(td) / "new-review"
             args = [sys.executable, str(SCRIPT), "--annotations", str(manifest), "--output-dir", str(output)]
