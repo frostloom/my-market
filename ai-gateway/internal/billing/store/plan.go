@@ -1250,8 +1250,9 @@ type ActivateResult struct {
 //
 // 幂等锚复用 topups uk_ref（零 schema 改动）：订阅行无 ref 列，改为同事务写一条 0 元流水
 // （source=subscription, ref_type="mall-sub", ref_id=ref）作为提交点——余额公式 Σtopups 不受
-// 0 元行影响，且天然成为程序化开通的审计流水。同 ref 重放 no-op 返回当前订阅（重放载荷不一致
-// 不动订阅，与 Credit「重放不校验金额」同口径）；跨租户 ref → FailedPrecondition（与 Credit 同口径）。
+// 0 元行影响，且天然成为程序化开通的审计流水。同 ref 重放 no-op 返回当前订阅（幂等预读先于
+// 套餐校验：重放不受套餐下架/改价影响，重放载荷不一致不动订阅，与 Credit「重放不校验金额」
+// 同口径）；跨租户 ref → FailedPrecondition（与 Credit 同口径）。
 func (s *Store) ActivateSubscription(ctx context.Context, tenantID, planID uint64, ref string) (*ActivateResult, error) {
 	if tenantID == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "tenant_id 必须 > 0")
@@ -1265,31 +1266,19 @@ func (s *Store) ActivateSubscription(ctx context.Context, tenantID, planID uint6
 	if err := s.requireActiveTenant(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	// 月费校验（模拟，不接真钱）：套餐在售且为定期订阅。
-	p, err := s.GetPlan(ctx, planID)
-	if err != nil {
-		return nil, err
-	}
-	if p == nil {
-		return nil, status.Errorf(codes.NotFound, "plan not found: %d", planID)
-	}
-	if p.Status != 0 {
-		return nil, status.Errorf(codes.FailedPrecondition, "套餐已下架: %s", p.Name)
-	}
-	if p.PlanType != PlanTypeRecurring {
-		return nil, status.Errorf(codes.FailedPrecondition, "仅定期订阅可开通: %s", p.Name)
-	}
 	// 与充值/退款/退订/并发开通互斥（每租户现金锁）：续期判定与写入必须串行。
 	locked, release, err := s.lockCash(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return locked.activateSubscriptionCash(locked.cashSQLContext(), tenantID, p, ref)
+	return locked.activateSubscriptionCash(locked.cashSQLContext(), tenantID, planID, ref)
 }
 
-func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID uint64, p *Plan, ref string) (*ActivateResult, error) {
-	// 幂等预读：同 ref 已激活过 → no-op 返回当前订阅。
+func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID, planID uint64, ref string) (*ActivateResult, error) {
+	// 幂等预读先行（先于套餐校验，与 Credit 的重放次序同口径）：同 ref 已激活过 →
+	// no-op 返回当前订阅，不再做套餐在售校验——激活成功后套餐被下架/改价，worker 用
+	// 同一 ref 重试必须仍 no-op（重放是 worker 重试不是新意图，载荷不参与判定）。
 	var marker Topup
 	err := s.db.WithContext(ctx).Where("ref_type = ? AND ref_id = ?", TopupSubActivateRefType, ref).First(&marker).Error
 	if err == nil {
@@ -1303,6 +1292,21 @@ func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID uint64, p
 		return &ActivateResult{Sub: sub, Activated: false}, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
+	}
+
+	// 月费校验（模拟，不接真钱）：套餐在售且为定期订阅（仅新激活/续期路径需要）。
+	p, err := s.GetPlan(ctx, planID)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, status.Errorf(codes.NotFound, "plan not found: %d", planID)
+	}
+	if p.Status != 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "套餐已下架: %s", p.Name)
+	}
+	if p.PlanType != PlanTypeRecurring {
+		return nil, status.Errorf(codes.FailedPrecondition, "仅定期订阅可开通: %s", p.Name)
 	}
 
 	now := time.Now()
@@ -1337,11 +1341,15 @@ func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID uint64, p
 			return err
 		}
 		if !inserted {
-			// 并发重放撞 uk_ref（提交点被预读到事务之间落库的获胜行占用）。
+			// 并发重放撞 uk_ref（提交点被预读到事务之间落库的获胜行占用；batch 模式
+			// 锁是进程内互斥，跨进程同租户并发时此分支是活的正确性保障）。
 			// 口径与预读一致：复核获胜行租户，跨租户 fail-closed，不给错误租户静默 no-op；
 			// 同租户并发按重放处理（获胜方已变更订阅，本方跳过写入）。
+			// 获胜行复核用锁读（FOR UPDATE，当前读）：RR 快照早于获胜事务提交时
+			// 普通读不可见会误报 not found，锁读永远读到最新已提交行。
 			var winner Topup
-			if err := tx.Where("ref_type = ? AND ref_id = ?", TopupSubActivateRefType, ref).First(&winner).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("ref_type = ? AND ref_id = ?", TopupSubActivateRefType, ref).First(&winner).Error; err != nil {
 				return err
 			}
 			if winner.TenantID != tenantID {
@@ -1368,12 +1376,14 @@ func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID uint64, p
 			result = &ActivateResult{Sub: row, Activated: true}
 		case entitled.CycleEnd != nil && entitled.CycleEnd.After(now):
 			// 未到期续一期（active 或退订未到期的当期权益）：RenewDue 单租户等价——
-			// newStart=旧 end（当期权益无缝），cycle_num+1；显式续购复活 auto_renew、
-			// 清 cancelled/pending（同套餐校验已通过，视同 pending 已应用）。
+			// newStart=旧 end（当期权益无缝）、cycle_num+1、应用 pending 换套餐
+			// （同套餐校验已保证 p.ID == nextPlanID，写 plan_id 即「应用 pending」，
+			// 与 RenewDue 应用 pending 后清字段同终态）；显式续购复活 auto_renew、
+			// 清 cancelled/pending。
 			newStart := *entitled.CycleEnd
 			newEnd := newStart.Add(period)
 			if err := tx.Model(&Subscription{}).Where("id = ?", entitled.ID).Updates(map[string]any{
-				"cycle_start": newStart, "cycle_end": newEnd,
+				"plan_id": p.ID, "cycle_start": newStart, "cycle_end": newEnd,
 				"cycle_num": entitled.CycleNum + 1,
 				"status":    SubActive, "auto_renew": true,
 				"pending_plan_id": nil, "cancelled_at": nil, "updated_at": now,
@@ -1381,6 +1391,7 @@ func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID uint64, p
 				return err
 			}
 			row := *entitled
+			row.PlanID = p.ID
 			row.CycleStart, row.CycleEnd, row.CycleNum = &newStart, &newEnd, entitled.CycleNum+1
 			row.Status, row.AutoRenew, row.PendingPlanID, row.CancelledAt = SubActive, true, nil, nil
 			result = &ActivateResult{Sub: &row, Activated: true, IsRenewal: true}

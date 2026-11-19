@@ -399,6 +399,56 @@ func TestActivateSubscription_Renew_ExtendsOneCycle(t *testing.T) {
 			t.Fatalf("rejected renew must not write marker, got %d", n)
 		}
 	})
+
+	t.Run("pending_plan_applied_on_renew", func(t *testing.T) {
+		e := newSubRpcTestEnv(t, 10_000)
+		if _, err := e.svc.ActivateSubscription(e.ctx, &billingv1.ActivateSubscriptionRequest{
+			TenantId: int64(e.tenant), PlanId: int64(e.plan), Ref: e.ref("ord_act_p1"),
+		}); err != nil {
+			t.Fatalf("first Activate: %v", err)
+		}
+		end1 := e.subRow().CycleEnd
+		// 既有改套餐路径挂 pending（下期生效，RenewDue 到期时应用）
+		if err := e.st.ChangePlan(e.ctx, e.tenant, e.planAlt); err != nil {
+			t.Fatalf("ChangePlan: %v", err)
+		}
+		var pending uint64
+		if err := e.db.Model(&store.Subscription{}).Where("id = ?", e.subRow().ID).
+			Select("pending_plan_id").Scan(&pending).Error; err != nil {
+			t.Fatalf("read pending: %v", err)
+		}
+		if pending != e.planAlt {
+			t.Fatalf("pending=%d, want %d（前置：ChangePlan 已挂 pending）", pending, e.planAlt)
+		}
+
+		// 购买 pending 套餐 → 续一期并应用 pending（买 B 得 B，不得清了 pending 停在 A）
+		reply, err := e.svc.ActivateSubscription(e.ctx, &billingv1.ActivateSubscriptionRequest{
+			TenantId: int64(e.tenant), PlanId: int64(e.planAlt), Ref: e.ref("ord_act_p2"),
+		})
+		if err != nil {
+			t.Fatalf("renew with pending plan: %v", err)
+		}
+		if !reply.Activated || !reply.IsRenewal {
+			t.Fatalf("renew={activated:%v renewal:%v}, want {true true}", reply.Activated, reply.IsRenewal)
+		}
+		if got := reply.Subscription.GetPlanId(); got != int64(e.planAlt) {
+			t.Fatalf("summary plan=%d, want %d（RenewDue 等价：应用 pending）", got, e.planAlt)
+		}
+		sub := e.subRow()
+		if sub.PlanID != e.planAlt {
+			t.Fatalf("plan_id=%d, want %d（pending 必须被应用）", sub.PlanID, e.planAlt)
+		}
+		if sub.PendingPlanID != nil {
+			t.Fatalf("pending_plan_id=%v, want nil（应用后清空）", sub.PendingPlanID)
+		}
+		if sub.CycleNum != 2 {
+			t.Fatalf("cycle_num=%d, want 2", sub.CycleNum)
+		}
+		within(t, "renewed cycle_end", *sub.CycleEnd, end1.Add(30*24*time.Hour), 2*time.Minute)
+		if n := e.markerCount(e.ref("ord_act_p2")); n != 1 {
+			t.Fatalf("marker rows=%d, want 1", n)
+		}
+	})
 }
 
 // TestActivateSubscription_CrossTenantRef_FailsConsistently 跨租户同 ref fail-closed
@@ -442,6 +492,88 @@ func TestActivateSubscription_CrossTenantRef_FailsConsistently(t *testing.T) {
 		t.Fatalf("tenant A replay Activated=true, want false")
 	}
 }
+
+// TestActivateSubscription_ReplayAfterPlanDelisted 重放是严格 no-op：激活成功后套餐被下架，
+// worker 用同一 ref 重试仍 no-op（幂等预读先于套餐校验，与 Credit「重放不校验载荷」同口径），
+// 不得把重放误判为套餐校验拒绝。
+func TestActivateSubscription_ReplayAfterPlanDelisted(t *testing.T) {
+	e := newSubRpcTestEnv(t, 10_000)
+	ref := e.ref("ord_act_delist")
+
+	first, err := e.svc.ActivateSubscription(e.ctx, &billingv1.ActivateSubscriptionRequest{
+		TenantId: int64(e.tenant), PlanId: int64(e.plan), Ref: ref,
+	})
+	if err != nil || !first.Activated {
+		t.Fatalf("first Activate: err=%v activated=%v", err, first.GetActivated())
+	}
+	end1 := time.Unix(first.Subscription.GetPeriodEnd(), 0)
+
+	// 下架套餐（激活成功后的运营动作）
+	if err := e.db.Model(&store.Plan{}).Where("id = ?", e.plan).Update("status", 1).Error; err != nil {
+		t.Fatalf("disable plan: %v", err)
+	}
+
+	replay, err := e.svc.ActivateSubscription(e.ctx, &billingv1.ActivateSubscriptionRequest{
+		TenantId: int64(e.tenant), PlanId: int64(e.plan), Ref: ref,
+	})
+	if err != nil {
+		t.Fatalf("replay after delist: %v（重放必须 no-op，套餐在售校验不得拦截同 ref 重试）", err)
+	}
+	if replay.Activated || replay.IsRenewal {
+		t.Fatalf("replay={activated:%v renewal:%v}, want {false false}", replay.Activated, replay.IsRenewal)
+	}
+	if got := replay.Subscription.GetPeriodEnd(); got != end1.Unix() {
+		t.Fatalf("replay period_end=%d, want unchanged %d", got, end1.Unix())
+	}
+	if n := e.markerCount(ref); n != 1 {
+		t.Fatalf("marker rows=%d, want 1", n)
+	}
+}
+
+// TestActivateSubscription_StaleActive_StartsFreshPeriod stale-active（过期未续，代码无
+// expired 标记写入方）：激活从 now 起新一期、原行续用（不新增第二条 active 行）、cycle_num+1。
+func TestActivateSubscription_StaleActive_StartsFreshPeriod(t *testing.T) {
+	e := newSubRpcTestEnv(t, 10_000)
+	start := time.Now().Add(-40 * 24 * time.Hour)
+	staleEnd := time.Now().Add(-10 * 24 * time.Hour)
+	stale := store.Subscription{
+		TenantID: e.tenant, PlanID: e.plan, PlanType: store.PlanTypeRecurring,
+		Status: store.SubActive, AutoRenew: true,
+		CycleStart: &start, CycleEnd: &staleEnd, CycleNum: 1, QuotaGranted: 0,
+	}
+	if err := e.db.Create(&stale).Error; err != nil {
+		t.Fatalf("seed stale active sub: %v", err)
+	}
+
+	reply, err := e.svc.ActivateSubscription(e.ctx, &billingv1.ActivateSubscriptionRequest{
+		TenantId: int64(e.tenant), PlanId: int64(e.plan), Ref: e.ref("ord_act_stale"),
+	})
+	if err != nil {
+		t.Fatalf("activate on stale active: %v", err)
+	}
+	if !reply.Activated || !reply.IsRenewal {
+		t.Fatalf("reply={activated:%v renewal:%v}, want {true true}", reply.Activated, reply.IsRenewal)
+	}
+	sub := e.subRow()
+	if sub.ID != stale.ID {
+		t.Fatalf("row id=%d, want 原行续用 %d（不得新增第二条 active 行）", sub.ID, stale.ID)
+	}
+	if sub.CycleNum != 2 || sub.PlanID != e.plan || sub.Status != store.SubActive || !sub.AutoRenew {
+		t.Fatalf("sub={plan:%d num:%d status:%s renew:%v}, want 主套餐/2/active/true", sub.PlanID, sub.CycleNum, sub.Status, sub.AutoRenew)
+	}
+	within(t, "fresh cycle_start", *sub.CycleStart, time.Now(), 2*time.Minute)
+	within(t, "fresh cycle_end", *sub.CycleEnd, time.Now().Add(30*24*time.Hour), 2*time.Minute)
+	if n := e.markerCount(e.ref("ord_act_stale")); n != 1 {
+		t.Fatalf("marker rows=%d, want 1", n)
+	}
+	if bal := e.ledgerBalance(); bal != 10_000 {
+		t.Fatalf("ledger balance=%d, want 10000", bal)
+	}
+}
+
+// uk 兜底分支（tx 内 !inserted 撞 uk_ref 的并发重放收敛）在 store 包内测：
+// activateSubscriptionCash/lockCash 为包内私有，且需构造 RR 快照竞败方，
+// 见 internal/billing/store/subscription_activate_fallback_test.go。
 
 // TestCancelSubscription_StopsRenewalKeepsPeriod 退订：置 auto_renew=0、status=cancelled，
 // 本期窗口（cycle_end）原样保留，余额不动（退订不退费）。
