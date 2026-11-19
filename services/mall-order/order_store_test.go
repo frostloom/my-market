@@ -2,7 +2,7 @@
 //
 // TDD 硬要求：本文件先于实现编写（RED），实现后转 GREEN。
 // 断言锚点 = scripts/seed-goods.sql 种子（101-140 general、201-203 recharge、
-// 301 subscription 未上架）。测试写入的 orders/items/cart 行与扣减的 stock
+// 301 subscription 月卡已上架，R2.5）。测试写入的 orders/items/cart 行与扣减的 stock
 // 一律在 t.Cleanup 还原（种子 44 商品锚点不被污染），可重复跑。
 //
 // DSN 来源：环境变量 MARKET_MYSQL_DSN 优先；未设置则从 deploy/compose/.env
@@ -351,6 +351,50 @@ func TestCreateOrder_RejectsRechargeType(t *testing.T) {
 	assertMallCode(t, err, mallerr.CodeGoodsTypeNotAllowed)
 	if got := countOrders(t, s, testTenantA); got != 0 {
 		t.Fatalf("orders = %d，want 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 6.5 TestCreateCartOrder_SubscriptionQtyLimitOne（R2.5-T3 必改 1：防绕过）
+// 购物车层限购可被直连 RPC 绕过——下单路径同校验：订阅行 qty≠1 → MALL_20005，
+// 零落单、零扣库存（正反两断言；同商品多行合并后 qty=2 同样被拦）。
+func TestCreateCartOrder_SubscriptionQtyLimitOne(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 301, 113) // 正例分支对 113 有 qty=2 扣减，一并快照还原
+	seedSubscriptionGoods(t, s)
+	before := stockOf(t, s, 301)
+
+	// 反断言：qty=2 → MALL_20005（下单行级限购，不依赖购物车层）。
+	_, err := s.CreateCartOrder(ctx, testTenantA, "sub-qty-2", []Line{{GoodsID: 301, Qty: 2}})
+	assertMallCode(t, err, mallerr.CodeGoodsQtyExceeded)
+	// 反断言：两行同商品各 qty=1，normalizeLines 合并后 qty=2 → 同样拒绝。
+	_, err = s.CreateCartOrder(ctx, testTenantA, "sub-qty-split", []Line{
+		{GoodsID: 301, Qty: 1}, {GoodsID: 301, Qty: 1},
+	})
+	assertMallCode(t, err, mallerr.CodeGoodsQtyExceeded)
+	if got := countOrders(t, s, testTenantA); got != 0 {
+		t.Fatalf("orders = %d，want 0（拒绝路径零落单）", got)
+	}
+	if got := stockOf(t, s, 301); got != before {
+		t.Fatalf("stock(301) = %d，want 保持 %d（拒绝路径零扣库存）", got, before)
+	}
+
+	// 正断言：qty=1 正常成单（混合 general 行不受限购影响）。
+	ord, err := s.CreateCartOrder(ctx, testTenantA, "sub-qty-1", []Line{
+		{GoodsID: 113, Qty: 2}, {GoodsID: 301, Qty: 1},
+	})
+	if err != nil {
+		t.Fatalf("CreateCartOrder（qty=1 正例）: %v", err)
+	}
+	if len(ord.Items) != 2 {
+		t.Fatalf("订单行 = %d，want 2", len(ord.Items))
+	}
+	for _, it := range ord.Items {
+		if it.GoodsID == 301 && it.Qty != 1 {
+			t.Fatalf("订阅行 qty = %d，want 1", it.Qty)
+		}
 	}
 }
 

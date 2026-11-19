@@ -11,9 +11,14 @@
 //     （ref_type="mall", ref_id=order_no:line_no）独立（ADR-005），实际退额 =
 //     min(请求额, 当前余额)（billing 侧已保证），以 returned refunded_cent 记实退额；
 //   - general（ship）行：直接退（mock 渠道无真实资金流，按行快照价×qty 记退款额）
-//     + 回补库存（restockOrder 既有对称口径：kind=2 全行 / kind=1 仅 limited 行）；
-//   - subscription 行：R2.5 前不会实际出现（种子 301 on_sale=0）；守卫拒绝
-//     （MALL_30002），TODO(R2.5)：接入退订语义（不退费=退订）。
+//   - 回补库存（restockOrder 既有对称口径：kind=2 全行 / kind=1 仅 limited 行）；
+//   - subscription 行（R2.5）：D15「退款=退订」——调 billing.CancelSubscription
+//     （ref="mall-sub-refund:{order_no}:{line_no}"，审计 ref；幂等来自 billing
+//     状态定点收敛：已退订重放 cancelled=false no-op，无生效/当期订阅 → NotFound
+//     按"无可退订"no-op，重放收敛不依赖 ref），**不退费**（该行金额不进退款额）。
+//     行标记退订落 billing 侧：订阅行 status=cancelled + auto_renew=0，当期权益
+//     保留至期满；mall_order_items 无行级退订列——与 credit 行退款证据落 billing
+//     topups 同口径，零 schema 改动（mall 侧订单整体翻 refunded 已含行终态）。
 //
 // 提交顺序与崩溃窗口分析（裁定 3："先全部子操作成功再置 refunded"）：
 //
@@ -70,9 +75,39 @@
 //     匹配 pending 行、worker done 0 行走 mall-void 补偿。残留：MALL_30008 到
 //     promote 完成之间存在短暂"退款暂不可用"，属预期语义（履约收口中）。
 //
+// subscribe 面竞态窗口（R2.5-T3 静态推演，复用 R2 三层防护框架；subscribe 履约
+// = ActivateSubscription 开通的是"可持续续费的权益"，与 credit 入账同构分析）：
+//
+//   - 窗口 R1（RefundPaid 作废 vs 正在执行的 subscribe 履约）：worker 批拉
+//     pending 快照 → RefundPaid 作废行+翻 refunded → worker 仍按快照执行
+//     subscribeLine → ActivateSubscription 已开通 → done 条件更新 0 行 →
+//     补偿前重读任务行终态（R2.5 必改 2，多执行器下 0 行有歧义）：voided →
+//     以 mall-void ref CancelSubscription 退订补偿（auto_renew=0，当期保留——
+//     与 D15 合规退款逐字节同终态，账本零漂移）；done（另一执行器已收口）→
+//     info 跳过。残留：复检与 Activate 之间的亚毫秒窗口由补偿兜底；补偿失败
+//     不重试（行已 voided），ERROR 日志交 R4 对账。
+//   - 窗口 R1'（Activate 已提交-done-不可达，同 credit R1'）：worker 在
+//     Activate 返回后、done 前崩溃 / Activate 客户端超时但 billing 已提交 →
+//     行停留 pending → RefundPaid 守卫只看 done、放行 → 行 voided 且 worker
+//     不再重放 → 订阅停留 active+auto_renew=1 而订单已 refunded（订阅不可
+//     收回，权益泄漏无金额泄漏——auto_renew 无限顺延）。残窗未闭合，R4 对账
+//     以 mall-sub 激活锚 × 订单 refunded × 订阅 active 三方交叉检出。
+//   - 窗口 R2（done 已标 vs promote 前）：done subscribe = 订阅已激活且将
+//     续费，直退=保留订阅又退款 → RefundPaid 的 done-credit 守卫扩展为
+//     credit+subscribe 双类型（前置 COUNT 与 void 后 FOR UPDATE 复查同扩），
+//     MALL_30008 拒绝，等 promote → fulfilled 走本文件退订路径。
+//   - 窗口 S（fulfilled 退款 vs Cancel）：Cancel 在 mall 事务外提交、终局
+//     事务失败 → 订单停留 fulfilled、订阅已退订（auto_renew=0，当期保留）。
+//     重试 RefundFulfilled：同 ref Cancel → 状态定点收敛 no-op（cancelled=
+//     false；订阅自然到期后 entitled 消失 → NotFound 亦按无可退订 no-op），
+//     最终一次翻转状态。并发重复退款同窗口 C 口径（状态收敛 + 条件更新赢家
+//     唯一）；billing Cancel 无 uk_ref 锚，幂等完全来自状态收敛（T1 裁定），
+//     双请求各自 Cancel 结果一致（同一订阅行定点收敛）。
+//
 // 上述所有窗口里 billing 都是幂等提交点，不需要 mall 侧补偿动作（无"先退钱
-// 再失败且无法收敛"的路径——R1 的冲销补偿是唯一主动补偿，其失败路径显式留
-// 对账；窗口 R1' 例外——非"无法收敛"而是残窗漏损，未闭合，见上）；唯一的
+// 再失败且无法收敛"的路径——R1 的 credit 冲销补偿与 subscribe 退订补偿是
+// 仅有的主动补偿，其失败路径显式留对账；窗口 R1' 例外——非"无法收敛"而是
+// 残窗漏损，未闭合，见上）；唯一的
 // 代价是窗口 B 期间"账实分离"（billing 已退、mall 未翻），收敛依赖用户重试
 // ——R2 接受此取舍（对账 job 属后续里程碑）。
 //
@@ -86,6 +121,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -101,8 +137,9 @@ import (
 var errOrderAlreadyRefunded = errors.New("mall-order: order already refunded")
 
 // RefundFulfilled fulfilled 订单退款（D15）：逐行冲退（credit）/直退+回补
-// （general），全部子操作成功后终局事务一次性迁移状态。返回本次实退金额
-// （Σ billing refunded_cent + general 行快照金额；重放全 no-op 时为 0）。
+// （general）/退订不退费（subscription，R2.5），全部子操作成功后终局事务一次性
+// 迁移状态。返回本次实退金额（Σ billing refunded_cent + general 行快照金额；
+// subscription 行不退费恒 0；重放全 no-op 时为 0）。
 // 提交顺序与崩溃窗口分析见文件头注释。
 func (s *Store) RefundFulfilled(ctx context.Context, tenantID uint64, orderNo string) (int64, error) {
 	// [1] 预读：归属校验（不匹配视为不存在，与 GetOrder 同口径）+ 状态守卫 +
@@ -132,23 +169,20 @@ func (s *Store) RefundFulfilled(ctx context.Context, tenantID uint64, orderNo st
 		return 0, err
 	}
 
-	// [2] 全行预检（先全查后执行）：subscription 行在动任何钱之前拒绝，
-	// 避免"冲退到一半撞守卫"的必然失败路径。
-	hasCredit := false
+	// [2] 全行预检（先全查后执行）：资金通道依赖在动任何钱之前判定，
+	// 避免"冲退到一半撞通道缺失"的必然失败路径。
+	hasBilling := false
 	for _, it := range items {
-		if it.Type == typeSubscription { // 行侧编码 3=subscribe（与 goods.type=3 同值、语义分属两表）
-			// TODO(R2.5)：接入订阅退订语义（不退费=退订）后移除本守卫。
-			return 0, mallerr.E(mallerr.CodeOrderStateInvalid, false,
-				"订阅行退款未实现（R2.5 退订语义）: %s:%d", orderNo, it.LineNo)
-		}
-		if it.Type == typeCredit {
-			hasCredit = true
+		if it.Type == typeCredit || it.Type == typeSubscription {
+			// credit 行冲退 / subscription 行退订都需要 billing 通道
+			//（订阅行编码 3=subscribe，与 goods.type=3 同值、语义分属两表）。
+			hasBilling = true
 		}
 	}
-	// 充值行需要 billing 通道；纯 general 单（无资金通道）不依赖 billing。
-	if hasCredit && s.billing == nil {
+	// 充值冲退/订阅退订需要 billing 通道；纯 general 单（无资金通道）不依赖 billing。
+	if hasBilling && s.billing == nil {
 		return 0, mallerr.E(mallerr.CodeUpstreamUnavailable, true,
-			"billing client 未接线（充值单冲退需要 %s/%s）", billingAddrEnv, billingTokenEnv)
+			"billing client 未接线（充值冲退/订阅退订需要 %s/%s）", billingAddrEnv, billingTokenEnv)
 	}
 
 	// [3] 逐行冲退/直退（事务外；每行幂等锚点独立，重试收敛——见文件头）。
@@ -178,6 +212,30 @@ func (s *Store) RefundFulfilled(ctx context.Context, tenantID uint64, orderNo st
 		case typeGeneral:
 			// general 行：直接退（mock 渠道，无真实资金流），按行快照记账。
 			refunded += it.PriceSnapshotCent * int64(it.Qty)
+		case typeSubscription:
+			// subscription 行（R2.5）：D15「退款=退订」，不退费（金额不进退款额）。
+			// Cancel 在 mall 事务外提交（同 Refund 的提交顺序裁定），崩溃窗口 S
+			// 见文件头：重试同 ref → billing 状态定点收敛 no-op（已退订
+			// cancelled=false / 无可退订 NotFound 按 no-op），幂等不依赖 ref。
+			cctx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
+			rep, err := s.billing.CancelSubscription(cctx, &billingv1.CancelSubscriptionRequest{
+				TenantId: int64(row.TenantID),
+				Ref:      fmt.Sprintf("mall-sub-refund:%s:%d", orderNo, it.LineNo),
+			})
+			cancel()
+			if err != nil {
+				if status.Code(err) == codes.NotFound {
+					// 无生效/当期订阅可退订：视同已退订 no-op（重放时订阅自然到期
+					// 的合法形态；权益不存在则"退款后不再续费"不变量平凡成立）。
+					log.Printf("[refund] info 退订 no-op（无生效订阅，视同已退订）: order=%s line=%d",
+						orderNo, it.LineNo)
+					continue
+				}
+				return 0, mapBillingError(err, fmt.Sprintf("cancel subscription %s:%d", orderNo, it.LineNo))
+			}
+			// cancelled=true 首次退订 / false=已退订（重放或 worker 竞态补偿已退）
+			// ——两者都按行处理成功继续（审计 ref 已随调用落 billing 日志）。
+			_ = rep.GetCancelled()
 		default:
 			return 0, mallerr.E(mallerr.CodeInternal, false,
 				"订单行类型非法: %s:%d（type=%d）", orderNo, it.LineNo, it.Type)

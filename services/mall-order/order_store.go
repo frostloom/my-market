@@ -4,10 +4,12 @@
 //
 // CreateCartOrder 事务语义（ADR-009 同库直扣）：
 //
-//	BEGIN → 校验商品（on_sale=1 且 type∈{1,3}）→ 逐行条件扣库存
+//	BEGIN → 校验商品（on_sale=1 且 type∈{1,3}；订阅商品还须已关联 billing
+//	套餐 ref_plan_id>0，缺关联 fail-closed 拒绝 MALL_30007）→ 逐行条件扣库存
 //	（UPDATE goods SET stock=stock-? WHERE id=? AND stock>=?，0 行 → MALL_20003
 //	整体回滚）→ INSERT mall_orders(kind=2) + mall_order_items（行号 1..n、
-//	价格/面值/赠送快照）→ COMMIT；amount = Σ(快照×qty)。
+//	价格/面值/赠送/ref_plan_id 快照，订阅行快照 billing plan id 供履约与
+//	退款审计）→ COMMIT；amount = Σ(快照×qty)。
 //
 // 幂等实现（不新增判定列）：撞 uk_tenant_idem 时读回原单，行集
 // （goods_id,qty 排序归并后）相同 → 返回原单（200 语义）；不同 → MALL_30003。
@@ -117,6 +119,7 @@ type orderItemRow struct {
 	PriceSnapshotCent int64     `gorm:"column:price_snapshot_cent"`
 	FaceValueCent     int64     `gorm:"column:face_value_cent"`
 	BonusCent         int64     `gorm:"column:bonus_cent"`
+	RefPlanID         uint64    `gorm:"column:ref_plan_id"` // 订阅行下单时快照 billing plan id（general/recharge 行=0）
 	CreatedAt         time.Time `gorm:"column:created_at"`
 }
 
@@ -134,6 +137,7 @@ type orderItemFull struct {
 	PriceSnapshotCent int64     `gorm:"column:price_snapshot_cent"`
 	FaceValueCent     int64     `gorm:"column:face_value_cent"`
 	BonusCent         int64     `gorm:"column:bonus_cent"`
+	RefPlanID         uint64    `gorm:"column:ref_plan_id"`
 	CreatedAt         time.Time `gorm:"column:created_at"`
 	GoodsName         string    `gorm:"column:goods_name"`
 	GoodsType         int8      `gorm:"column:goods_type"`
@@ -305,6 +309,18 @@ func (s *Store) createCartOrderOnce(ctx context.Context, tenantID uint64, idemKe
 			case g.Type != typeGeneral && g.Type != typeSubscription:
 				return mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
 					"商品 %d 类型不可进购物车单（recharge 仅直购）", l.GoodsID)
+			case g.Type == typeSubscription && g.RefPlanID == 0:
+				// 订阅商品未关联 billing plan：行快照 ref_plan_id=0 的订阅行必将在
+				// 履约侧永远失败（退避 5 败 → failed 交对账），fail-closed 下单时拒绝。
+				return mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
+					"商品 %d 配置非法（订阅商品未关联套餐）", l.GoodsID)
+			case g.Type == typeSubscription && l.Qty != 1:
+				// 订阅商品限购 qty=1（R2.5 必改 1，防绕过）：履约/任务模型是行级的，
+				// 一行订阅商品只开通一期，qty>1 收双倍货款只开一期。normalizeLines
+				// 已合并同商品多行，此处守卫覆盖直连 RPC 绕过购物车层限购的路径
+				//（购物车 AddCart/PatchCartQty 同口径拦截，MALL_20005）。
+				return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+					"订阅商品限购 1 件: %d（qty=%d）", l.GoodsID, l.Qty)
 			}
 		}
 
@@ -342,7 +358,9 @@ func (s *Store) createCartOrderOnce(ctx context.Context, tenantID uint64, idemKe
 			return err // 原样上抛，保留 *mysql.MySQLError 供分流
 		}
 
-		// 5) 行快照：行号 1..n，履约类型按商品类型映射。
+		// 5) 行快照：行号 1..n，履约类型按商品类型映射；ref_plan_id 下单时快照
+		//    （订阅行=商品关联的 billing 套餐 id，履约/退款按快照走；general 行
+		//    goods.ref_plan_id 恒 0 → 行快照 0）。
 		items := make([]orderItemRow, 0, len(norm))
 		for i, l := range norm {
 			g := byID[l.GoodsID]
@@ -356,6 +374,7 @@ func (s *Store) createCartOrderOnce(ctx context.Context, tenantID uint64, idemKe
 				PriceSnapshotCent: g.PriceCent,
 				FaceValueCent:     g.FaceValueCent,
 				BonusCent:         g.BonusCent,
+				RefPlanID:         g.RefPlanID,
 				CreatedAt:         now,
 			})
 		}
@@ -474,6 +493,7 @@ func (s *Store) createRechargeOrderOnce(ctx context.Context, tenantID uint64, go
 			PriceSnapshotCent: g.PriceCent,
 			FaceValueCent:     g.FaceValueCent,
 			BonusCent:         g.BonusCent,
+			RefPlanID:         0, // recharge 行不订阅套餐：快照恒 0（快照路径通用口径）
 			CreatedAt:         now,
 		}
 		if err := tx.Create(&item).Error; err != nil {
@@ -663,6 +683,7 @@ func itemRowsToFull(rows []orderItemRow, byID map[uint64]goodsRow) []orderItemFu
 			PriceSnapshotCent: r.PriceSnapshotCent,
 			FaceValueCent:     r.FaceValueCent,
 			BonusCent:         r.BonusCent,
+			RefPlanID:         r.RefPlanID,
 			CreatedAt:         r.CreatedAt,
 			GoodsName:         g.Name,
 			GoodsType:         g.Type,

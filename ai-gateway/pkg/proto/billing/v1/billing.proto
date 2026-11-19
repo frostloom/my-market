@@ -37,6 +37,15 @@ service BillingService {
   // 退款（R2 商城冲退，加法改造）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
   // ref 为幂等锚点（topups ref_type="refund", ref_id=ref）。同 ref 重放 no-op：refunded_cent=0。
   rpc Refund(RefundRequest) returns (RefundReply);
+  // 开通/续期月卡订阅（R2.5 商城月卡闭环，加法改造）：幂等 ref 锚在 topups
+  // （ref_type="mall-sub"，ref_id=ref，0 元流水复用 uk_ref，零 schema 改动）。
+  // 无本期权益 → 按 plan 开通本期（模拟月费校验，不接真钱）；
+  // 已有本期权益 → 自本期期满顺延一个周期（RenewDue 单租户等价，跨套餐 fail-closed）；
+  // 同 ref 重放 no-op 返回当前订阅摘要；跨租户 ref → FailedPrecondition。
+  rpc ActivateSubscription(ActivateSubscriptionRequest) returns (ActivateSubscriptionReply);
+  // 退订（R2.5「退款=退订」语义，加法改造）：置 auto_renew=0、当期权益保留至期满、不退费；
+  // 已退订重放 no-op（定点收敛状态迁移天然幂等，ref 仅作审计关联锚，不落账本行）。
+  rpc CancelSubscription(CancelSubscriptionRequest) returns (CancelSubscriptionReply);
 }
 
 message ReserveRequest {
@@ -142,4 +151,36 @@ message RefundRequest {
 
 message RefundReply {
   int64 refunded_cent = 1; // 实际退额；同 ref 重放为 0（no-op）
+}
+
+// SubscriptionSummary 订阅摘要（开通/退订 RPC 的返回；无订阅时各字段零值）。
+message SubscriptionSummary {
+  int64 plan_id = 1;      // 生效套餐
+  string status = 2;      // active/cancelled；无订阅为空
+  bool auto_renew = 3;    // 到期自动续费
+  int64 cycle_num = 4;    // 已续期数
+  int64 period_start = 5; // 本期起（Unix 秒）；0=无订阅
+  int64 period_end = 6;   // 本期止（Unix 秒）；0=无订阅
+}
+
+message ActivateSubscriptionRequest {
+  int64 tenant_id = 1;
+  int64 plan_id = 2; // 必须为在售（status=0）定期订阅套餐
+  string ref = 3;    // 幂等锚点（topups ref_type="mall-sub"，ref_id=ref）；1-64 字符
+}
+
+message ActivateSubscriptionReply {
+  bool activated = 1;  // true=本次生效（开通或续一期）；false=同 ref 重放 no-op
+  bool is_renewal = 2; // true=本次为续一期（自本期期满顺延一个周期）
+  SubscriptionSummary subscription = 3;
+}
+
+message CancelSubscriptionRequest {
+  int64 tenant_id = 1;
+  string ref = 2; // 审计关联锚；1-64 字符（幂等来自状态定点收敛，见服务注释）
+}
+
+message CancelSubscriptionReply {
+  bool cancelled = 1; // true=本次置退订；false=已退订（no-op）
+  SubscriptionSummary subscription = 2;
 }

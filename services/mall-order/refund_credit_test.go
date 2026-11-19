@@ -1,7 +1,8 @@
 // mall-order fulfilled 退款测试（R2-T3）：fulfilled 订单逐行退款——
 // recharge（credit）行经 billing.Refund 冲退（ref="mall-refund:{order_no}:{line_no}"，
 // 与入账 ref 独立；实际退额 = min(请求额, 当前余额)，以 refunded_cent 记实退额），
-// general 行直退 + 回补库存（既有口径），subscription 行守卫拒绝（R2.5 前不出现）。
+// general 行直退 + 回补库存（既有口径），subscription 行退订不退费
+// （R2.5-T3，见 refund_subscribe_test.go）。
 //
 // TestRefund_FulfilledRecharge_MinRule 连真 billing（spawn ai-gateway cmd/billing
 // 子进程，见 worker_credit_test.go 的 harness）三态：

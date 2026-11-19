@@ -148,9 +148,10 @@ func (s *orderServer) CancelOrder(ctx context.Context, req *mallv1.CancelOrderRe
 }
 
 // RefundOrder 退款（契约 §5 规则 D15，按订单状态分流）：
-//   - paid → RefundPaid（R1 既有：作废 pending 履约行 + 状态迁移）；
-//   - fulfilled → RefundFulfilled（R2-T3：recharge 行 billing.Refund 冲退
-//     min 口径、general 行直退+回补、subscription 行守卫拒绝）；
+//   - paid → RefundPaid（R1 既有：作废 pending 履约行 + 状态迁移；R2.5 起
+//     done 的 credit/subscribe 行同被守卫拒绝 MALL_30008）；
+//   - fulfilled → RefundFulfilled（R2-T3/R2.5：recharge 行 billing.Refund 冲退
+//     min 口径、general 行直退+回补、subscription 行退订不退费）；
 //   - refunded → 幂等 no-op；created/closed → MALL_30002。
 //
 // RefundReply.refund_cent 口径：fulfilled 冲退 = 本次实退额（billing

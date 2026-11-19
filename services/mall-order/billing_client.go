@@ -7,10 +7,12 @@
 // CONTROL_PLANE_TOKEN 同值共享）。ai-gateway 的 internal/pkg/controlplane 不可跨
 // 服务 import，键名以本文件常量落契约（T4 compose 注入同名 env 双侧对齐）。
 //
-// 调用点（R2-T3 已接线）：worker credit 行履约 Credit（worker.go creditLine）/
-// fulfilled 充值单冲退 Refund（refund.go）。接口方法签名与
-// billingv1.BillingServiceClient 一致，测试注入函数桩（stubBilling）或真子进程
-// client（recordingBilling 包装）即可。
+// 调用点（R2-T3 已接线 / R2.5-T2 扩两方法）：worker credit 行履约 Credit
+// （worker.go creditLine）/ fulfilled 充值单冲退 Refund（refund.go）/
+// subscribe 行履约 ActivateSubscription（worker.go subscribeLine）/
+// 订阅退订 CancelSubscription（worker.go 退订补偿；T3 退款=退订复用同接口）。
+// 接口方法签名与 billingv1.BillingServiceClient 一致，测试注入函数桩
+// （stubBilling）或真子进程 client（recordingBilling 包装）即可。
 package main
 
 import (
@@ -38,18 +40,21 @@ const (
 )
 
 // BillingClient billing 控制面客户端接口（T3 worker 注入点：信用卡履约
-// Credit / fulfilled 冲退 Refund）。签名与 billingv1.BillingServiceClient
-// 对应方法一致，生成 client 直接满足接口。
+// Credit / fulfilled 冲退 Refund；R2.5-T2 订阅售卖：subscribe 行履约
+// ActivateSubscription / voided 竞态退订补偿与退款退订 CancelSubscription）。
+// 签名与 billingv1.BillingServiceClient 对应方法一致，生成 client 直接满足接口。
 type BillingClient interface {
 	Credit(ctx context.Context, in *billingv1.CreditRequest, opts ...grpc.CallOption) (*billingv1.CreditReply, error)
 	Refund(ctx context.Context, in *billingv1.RefundRequest, opts ...grpc.CallOption) (*billingv1.RefundReply, error)
+	ActivateSubscription(ctx context.Context, in *billingv1.ActivateSubscriptionRequest, opts ...grpc.CallOption) (*billingv1.ActivateSubscriptionReply, error)
+	CancelSubscription(ctx context.Context, in *billingv1.CancelSubscriptionRequest, opts ...grpc.CallOption) (*billingv1.CancelSubscriptionReply, error)
 }
 
 // 编译期守卫：生成 client 满足接口（billing 契约漂移在编译期暴露）。
 var _ BillingClient = billingv1.NewBillingServiceClient(nil)
 
 // tokenUnaryClient 出站一元拦截器：每请求注入 X-Control-Token metadata
-//（ai-gateway controlplane.UnaryClient 同款语义；mall 侧自持实现）。
+// （ai-gateway controlplane.UnaryClient 同款语义；mall 侧自持实现）。
 func tokenUnaryClient(secret string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any,
 		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
