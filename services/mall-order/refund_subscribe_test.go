@@ -148,11 +148,16 @@ func TestRefund_Subscription_CancelsNotRefunds(t *testing.T) {
 			t.Fatalf("履约后订阅前置态异常: %+v", billingSubOf(t, env))
 		}
 		wantCycleNum := billingSubOf(t, env).CycleNum
+		stockBeforeRefund := stockOf(t, s, 113)
 
 		// fulfilled 退款：general 行直退、订阅行退订不退费。
 		refunded, err := s.RefundFulfilled(ctx, tenantID, ord.OrderNo)
 		if err != nil {
 			t.Fatalf("RefundFulfilled: %v", err)
+		}
+		// general 行回补（acceptance R2.5：restockOrder 对称口径，kind=2 全行）。
+		if got := stockOf(t, s, 113); got != stockBeforeRefund+1 {
+			t.Fatalf("stock(113) = %d，want %d（退款回补 qty=1）", got, stockBeforeRefund+1)
 		}
 		if refunded != generalCent {
 			t.Fatalf("refunded = %d，want %d（仅 general 行；订阅行金额 %d 不进退款额）",
