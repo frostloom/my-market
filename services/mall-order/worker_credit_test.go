@@ -658,6 +658,46 @@ func TestWorker_CreditVoidCompensation(t *testing.T) {
 		}
 	})
 
+	t.Run("no_compensation_when_done_by_other_executor", func(t *testing.T) {
+		// R2.5-T3 必改 2：done 更新 0 行在多执行器下歧义——0 行也可能是另一执行器
+		// 已把行标 done（幂等条件更新的输家）。补偿前重读任务行：仅 voided 才冲销；
+		// done（另一执行器已收口，余额归属正确）→ info 跳过，绝不双重冲销。
+		ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "cred-void-c")
+		if err != nil {
+			t.Fatalf("CreateRechargeOrder: %v", err)
+		}
+		if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+			TradeNo: "T-cred-void-c", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+			t.Fatalf("MarkPaidTx: %v", err)
+		}
+		// 竞态注入：Credit 提交后、done 标记前，另一执行器已完成收口（行 done，
+		// 订单照常 paid——promote 由该执行器负责）——本方 done 更新必 0 行。
+		stub := &stubBilling{onCredit: func(*billingv1.CreditRequest) {
+			_ = s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+				taskStatusDone, ord.OrderNo).Error
+		}}
+		s.billing = stub
+
+		done, err := s.RunFulfillmentOnce(ctx)
+		if err != nil {
+			t.Fatalf("RunFulfillmentOnce: %v", err)
+		}
+		if done != 0 {
+			t.Fatalf("done = %d，want 0（本方未收口，另一执行器已标 done）", done)
+		}
+		if n := len(stub.creditCalls()); n != 1 {
+			t.Fatalf("Credit 调用 %d 次，want 1（uk_ref 幂等，重入无害）", n)
+		}
+		if n := len(stub.refundCalls()); n != 0 {
+			t.Fatalf("Refund（冲销补偿）调用 %d 次，want 0（行已 done=另一执行器收口，不得冲销）", n)
+		}
+		for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+			if task.Status != taskStatusDone {
+				t.Fatalf("任务行 status=%d，want 保持 done=2", task.Status)
+			}
+		}
+	})
+
 	t.Run("compensates_when_voided_after_credit", func(t *testing.T) {
 		ord, err := s.CreateRechargeOrder(ctx, testTenantA, 202, "cred-void-b")
 		if err != nil {

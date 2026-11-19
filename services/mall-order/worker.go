@@ -13,9 +13,10 @@
 // subscribe 行同构（mall-sub 0 元锚 uk_ref，TestWorker_SubscribeRealBilling_MixedOrderFulfills）。
 // 并发退款竞态（窗口 R1：快照拉取后被 RefundPaid 作废）两层防护覆盖
 // void-先于提交与 done-已提交两类交错（credit：mall-void 冲销补偿；subscribe：
-// mall-void 退订补偿）；Credit-已提交-done-不可达交错
-// 见窗口 R1'（未闭合，R4 对账检出）。防护 = 执行前复检 pending（缩窗）+
-// 提交后 done 0 行时 mall-void ref 补偿
+// mall-void 退订补偿；done 更新 0 行时补偿前重读任务行——仅 voided 才补偿，
+// done=另一执行器已收口则 info 跳过，R2.5 必改 2）；Credit-已提交-done-不可达
+// 交错见窗口 R1'（未闭合，R4 对账检出）。防护 = 执行前复检 pending（缩窗）+
+// 提交后 done 0 行时重读分诊 mall-void ref 补偿
 // （creditLine/compensateVoidedCredit、subscribeLine/cancelVoidedSubscription；
 // 窗口分析见 refund.go 文件头）。
 //
@@ -230,8 +231,9 @@ func (s *Store) backoffTask(ctx context.Context, t fulfillmentTaskRow, shipErr e
 //   - 层一（缩窗）：执行前单行复检任务行仍 pending——快照拉取与执行之间已被
 //     voided 的行静默跳过（零副作用，不触 billing）；
 //   - 层二（兜底）：入账提交后 done 条件更新影响 0 行（复检与 done 之间的
-//     亚毫秒窗口内被 voided）→ billing 已真实入账而订单已被退款 → 立即以独立
-//     冲销 ref `mall-void:{order_no}:{line_no}` 调 billing.Refund 补偿并告警。
+//     窗口内行被并发变更）→ 补偿前重读任务行终态（R2.5 必改 2，多执行器下
+//     0 行有歧义）：仅 voided 才以独立冲销 ref `mall-void:{order_no}:{line_no}`
+//     调 billing.Refund 补偿并告警；done（另一执行器已收口）→ info 日志跳过。
 //
 // 返回 marked：任务行已标 done（正常收口）= true；跳过（已 voided）或已冲销
 // 补偿 = false（均不计入本轮 done，行未完成）。
@@ -291,10 +293,11 @@ func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) (bool, err
 		return false, fmt.Errorf("billing credit %s:%d: %w", t.OrderNo, t.LineNo, err)
 	}
 
-	// 层二：入账已提交 → done 条件更新。0 行 = 行在此窗口内被并发退款 voided
-	//（复检与 done 之间的亚毫秒残留）——租户对该单既无订单也不该留余额，
-	// 立即冲销补偿。done 更新自身报 DB 错则按失败退避（重放：Credit 同 ref
-	// no-op → done 更新重试；若行彼时已 voided 则走本补偿分支收口）。
+	// 层二：入账已提交 → done 条件更新。0 行 = 行在复检与 done 之间的窗口内被
+	// 并发变更——多执行器下语义歧义：可能是并发退款 voided（租户对该单既无订单
+	// 也不该留余额，须冲销），也可能是另一执行器已完成收口（余额归属正确，不得
+	// 冲销）。done 更新自身报 DB 错则按失败退避（重放：Credit 同 ref no-op →
+	// done 更新重试；若行彼时已 voided 则走本补偿分支收口）。
 	res := s.db.WithContext(ctx).Exec(
 		"UPDATE fulfillment_tasks SET status = ?, last_error = '' WHERE id = ? AND status = ?",
 		taskStatusDone, t.ID, taskStatusPending)
@@ -303,6 +306,19 @@ func (s *Store) creditLine(ctx context.Context, t fulfillmentTaskRow) (bool, err
 	}
 	if res.RowsAffected == 1 {
 		return true, nil
+	}
+	// 补偿前重读任务行终态（R2.5 必改 2）：仅 voided 才发冲销补偿；done（另一
+	// 执行器已收口）/failed 等其余终态记 info 跳过——重复冲销会凭空扣减租户余额。
+	var stAfter int8
+	if err := s.db.WithContext(ctx).
+		Raw("SELECT status FROM fulfillment_tasks WHERE id = ?", t.ID).
+		Scan(&stAfter).Error; err != nil {
+		return false, fmt.Errorf("mall-order: reread credit task %d: %w", t.ID, err)
+	}
+	if stAfter != taskStatusVoided {
+		log.Printf("[worker] info credit done 更新 0 行且行非 voided（另一执行器已收口，跳过冲销补偿）: order=%s line=%d status=%d",
+			t.OrderNo, t.LineNo, stAfter)
+		return false, nil
 	}
 	s.compensateVoidedCredit(ctx, t, line.TenantID, amount)
 	return false, nil
@@ -349,10 +365,11 @@ func (s *Store) compensateVoidedCredit(ctx context.Context, t fulfillmentTaskRow
 //   - 层一（缩窗）：执行前单行复检任务行仍 pending——快照拉取与执行之间已被
 //     voided 的行静默跳过（零副作用，不触 billing）；
 //   - 层二（兜底）：激活提交后 done 条件更新影响 0 行（复检与 done 之间的
-//     亚毫秒窗口内被 voided）→ billing 已开通而订单已被退款 → 立即以独立
-//     审计 ref `mall-void:{order_no}:{line_no}` 调 billing.CancelSubscription
-//     退订补偿（R2.5「退款=退订」语义：置 auto_renew=0 阻止退款后继续续费，
-//     当期权益保留至期满；Cancel 状态定点收敛幂等，与 T3 退款路径同接口）。
+//     窗口内行被并发变更）→ 补偿前重读任务行终态（R2.5 必改 2，与 creditLine
+//     同构）：仅 voided 才以独立审计 ref `mall-void:{order_no}:{line_no}` 调
+//     billing.CancelSubscription 退订补偿（R2.5「退款=退订」语义：置
+//     auto_renew=0 阻止退款后继续续费，当期权益保留至期满）；done（另一执行器
+//     已收口）→ info 日志跳过；Cancel 状态定点收敛幂等，与 T3 退款路径同接口。
 //
 // 返回 marked：任务行已标 done（正常收口）= true；跳过（已 voided）或已退订
 // 补偿 = false（均不计入本轮 done，行未完成）。
@@ -417,10 +434,11 @@ func (s *Store) subscribeLine(ctx context.Context, t fulfillmentTaskRow) (bool, 
 			t.OrderNo, t.LineNo, line.RefPlanID, rep.GetSubscription().GetPeriodEnd())
 	}
 
-	// 层二：激活已提交 → done 条件更新。0 行 = 行在此窗口内被并发退款 voided
-	//（复检与 done 之间的亚毫秒残留）——订单已退款而订阅仍将自动续费，立即退订
-	// 补偿（退款=退订）。done 更新自身报 DB 错则按失败退避（重放：激活同 ref
-	// no-op → done 更新重试；若行彼时已 voided 则走本补偿分支收口）。
+	// 层二：激活已提交 → done 条件更新。0 行 = 行在复检与 done 之间的窗口内被
+	// 并发变更——多执行器下语义歧义：可能是并发退款 voided（订单已退款而订阅
+	// 仍将自动续费，须退订），也可能是另一执行器已完成收口（订阅归属正确，
+	// 不得误退订在生效的订阅）。done 更新自身报 DB 错则按失败退避（重放：激活
+	// 同 ref no-op → done 更新重试；若行彼时已 voided 则走本补偿分支收口）。
 	res := s.db.WithContext(ctx).Exec(
 		"UPDATE fulfillment_tasks SET status = ?, last_error = '' WHERE id = ? AND status = ?",
 		taskStatusDone, t.ID, taskStatusPending)
@@ -429,6 +447,19 @@ func (s *Store) subscribeLine(ctx context.Context, t fulfillmentTaskRow) (bool, 
 	}
 	if res.RowsAffected == 1 {
 		return true, nil
+	}
+	// 补偿前重读任务行终态（R2.5 必改 2，与 creditLine 同构）：仅 voided 才发
+	// 退订补偿；done（另一执行器已收口）/failed 等其余终态记 info 跳过。
+	var stAfter int8
+	if err := s.db.WithContext(ctx).
+		Raw("SELECT status FROM fulfillment_tasks WHERE id = ?", t.ID).
+		Scan(&stAfter).Error; err != nil {
+		return false, fmt.Errorf("mall-order: reread subscribe task %d: %w", t.ID, err)
+	}
+	if stAfter != taskStatusVoided {
+		log.Printf("[worker] info subscribe done 更新 0 行且行非 voided（另一执行器已收口，跳过退订补偿）: order=%s line=%d status=%d",
+			t.OrderNo, t.LineNo, stAfter)
+		return false, nil
 	}
 	s.cancelVoidedSubscription(ctx, t, line.TenantID)
 	return false, nil

@@ -397,6 +397,51 @@ func TestWorker_SubscribeVoidCompensation(t *testing.T) {
 		}
 	})
 
+	t.Run("no_cancel_when_done_by_other_executor", func(t *testing.T) {
+		// R2.5-T3 必改 2：激活提交后 done 更新 0 行在多执行器下歧义——0 行也可能是
+		// 另一执行器已把行标 done。补偿前重读任务行：仅 voided 才退订；done（另一
+		// 执行器已收口，订阅归属正确）→ info 跳过，绝不误退订在生效的订阅。
+		ord, err := s.CreateCartOrder(ctx, testTenantA, "sub-void-c", []Line{{GoodsID: 301, Qty: 1}})
+		if err != nil {
+			t.Fatalf("CreateCartOrder: %v", err)
+		}
+		if err := s.MarkPaidTx(ctx, Callback{OrderNo: ord.OrderNo, Provider: "mock",
+			TradeNo: "T-sub-void-c", Paid: true, AmountCent: ord.AmountCent}); err != nil {
+			t.Fatalf("MarkPaidTx: %v", err)
+		}
+		// 竞态注入：ActivateSubscription 提交后、done 标记前，另一执行器已完成收口
+		//（行 done，订单照常 paid——promote 由该执行器负责）——本方 done 更新必 0 行。
+		stub := &stubBilling{onActivate: func(*billingv1.ActivateSubscriptionRequest) {
+			_ = s.db.Exec("UPDATE fulfillment_tasks SET status = ? WHERE order_no = ?",
+				taskStatusDone, ord.OrderNo).Error
+		}}
+		s.billing = stub
+
+		done, err := s.RunFulfillmentOnce(ctx)
+		if err != nil {
+			t.Fatalf("RunFulfillmentOnce: %v", err)
+		}
+		if done != 0 {
+			t.Fatalf("done = %d，want 0（本方未收口，另一执行器已标 done）", done)
+		}
+		if n := len(stub.activateCalls()); n != 1 {
+			t.Fatalf("ActivateSubscription 调用 %d 次，want 1（同 ref 幂等，重入无害）", n)
+		}
+		if n := len(stub.cancelCalls()); n != 0 {
+			t.Fatalf("CancelSubscription 调用 %d 次，want 0（行已 done=另一执行器收口，不得退订）", n)
+		}
+		for _, task := range taskRowsOf(t, s, ord.OrderNo) {
+			if task.Status != taskStatusDone {
+				t.Fatalf("任务行 status=%d，want 保持 done=2", task.Status)
+			}
+		}
+		// 订单随 promote 全量扫描收敛 fulfilled（行已 done = 收口完成，推送
+		// 属正常推进；关键断言是不发生退订、不误伤在生效订阅）。
+		if st, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); st != "fulfilled" {
+			t.Fatalf("订单 status = %s，want fulfilled（全行 done 由 promote 扫描推进）", st)
+		}
+	})
+
 	t.Run("cancels_when_voided_after_activate", func(t *testing.T) {
 		ord, err := s.CreateCartOrder(ctx, testTenantA, "sub-void-b", []Line{{GoodsID: 301, Qty: 1}})
 		if err != nil {

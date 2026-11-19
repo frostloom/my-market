@@ -314,6 +314,13 @@ func (s *Store) createCartOrderOnce(ctx context.Context, tenantID uint64, idemKe
 				// 履约侧永远失败（退避 5 败 → failed 交对账），fail-closed 下单时拒绝。
 				return mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
 					"商品 %d 配置非法（订阅商品未关联套餐）", l.GoodsID)
+			case g.Type == typeSubscription && l.Qty != 1:
+				// 订阅商品限购 qty=1（R2.5 必改 1，防绕过）：履约/任务模型是行级的，
+				// 一行订阅商品只开通一期，qty>1 收双倍货款只开一期。normalizeLines
+				// 已合并同商品多行，此处守卫覆盖直连 RPC 绕过购物车层限购的路径
+				//（购物车 AddCart/PatchCartQty 同口径拦截，MALL_20005）。
+				return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+					"订阅商品限购 1 件: %d（qty=%d）", l.GoodsID, l.Qty)
 			}
 		}
 

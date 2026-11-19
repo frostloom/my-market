@@ -1,6 +1,8 @@
 // mall-order：购物车存储层（cart_items 表）。
 // upsert 合并 qty（uk_tenant_goods）、20 行上限 MALL_20004、qty 1..99 MALL_20005；
-// recharge（type=2）与未上架商品不可加购（MALL_30007 / MALL_20002）。
+// recharge（type=2）与未上架商品不可加购（MALL_30007 / MALL_20002）；
+// 订阅商品（type=3）限购 qty=1（MALL_20005，R2.5 必改 1：AddCart/合并/PATCH
+// 三入口同口径，下单路径另有同款守卫防直连 RPC 绕过）。
 package main
 
 import (
@@ -16,9 +18,9 @@ import (
 
 // 购物车上限（api-contract §4）。
 const (
-	cartMaxRows    = 20
-	cartQtyMin     = 1
-	cartQtyMax     = 99
+	cartMaxRows = 20
+	cartQtyMin  = 1
+	cartQtyMax  = 99
 )
 
 // cartRow cart_items 表行（db-schema.sql）。
@@ -73,6 +75,13 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 		return nil, mallerr.E(mallerr.CodeGoodsTypeNotAllowed, false,
 			"商品 %d 不可加购（recharge 仅直购）", goodsID)
 	}
+	// 订阅商品限购 qty=1（R2.5 必改 1）：履约/任务模型是行级的——一行订阅商品
+	// 只开通一期，qty>1 会收双倍货款只开一期（资金缺口）。购物车、PATCH、下单
+	// 三处入口同口径拦截（防绕过）；真钱接入（P5）前必须闭合。
+	if g.Type == typeSubscription && qty != 1 {
+		return nil, mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+			"订阅商品限购 1 件: %d（qty=%d）", goodsID, qty)
+	}
 	// 秒杀商品不可加购（契约 §4「recharge/秒杀商品返回 MALL_30007」）：
 	// 存在 status=2（上线）活动的商品一律拒绝，不限时间窗——上线即拒，
 	// 避免加购后结算时点落入活动窗口造成双通道成交；草稿(1)/结束(3)不拒。
@@ -94,10 +103,15 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 			First(&exist).Error
 		switch {
 		case err == nil:
-			// 合并：同商品累加 qty，封顶 99（撞 chk_qty 前先拒绝，给出契约码）。
+			// 合并：同商品累加 qty，封顶 99（撞 chk_qty 前先拒绝，给出契约码）；
+			// 订阅商品合并后仍须恰 1——既有行存在时任何累加都越限购，拒绝。
 			if int(exist.Qty)+qty > cartQtyMax {
 				return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
 					"商品数量超限: 合并后 %d（≤99）", int(exist.Qty)+qty)
+			}
+			if g.Type == typeSubscription && int(exist.Qty)+qty != 1 {
+				return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+					"订阅商品限购 1 件: %d（合并后 %d）", goodsID, int(exist.Qty)+qty)
 			}
 			if err := tx.Model(&cartRow{}).Where("id = ?", exist.ID).
 				Updates(map[string]any{"qty": int(exist.Qty) + qty, "updated_at": now}).Error; err != nil {
@@ -134,7 +148,8 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 }
 
 // PatchCartQty 改数量（契约 PATCH /cart/items/{id}）；qty=0 等价删除。
-// 目标行不存在或不属于该租户 → MALL_10005（参数错误，且避免跨租户探测）。
+// 目标行不存在或不属于该租户 → MALL_10005（参数错误，且避免跨租户探测）；
+// 订阅商品行 qty 限购 1（R2.5 必改 1，与 AddCart 同口径 MALL_20005）。
 func (s *Store) PatchCartQty(ctx context.Context, tenantID uint64, itemID uint64, qty int) (*CartView, error) {
 	if qty == 0 {
 		if err := s.db.WithContext(ctx).Exec(
@@ -146,6 +161,20 @@ func (s *Store) PatchCartQty(ctx context.Context, tenantID uint64, itemID uint64
 	if qty < cartQtyMin || qty > cartQtyMax {
 		return nil, mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
 			"商品数量越界: %d（1..99，0 等价删除）", qty)
+	}
+	// 订阅商品限购 qty=1（与 AddCart 同口径，第三条绕过口）：目标行商品为
+	// 订阅类型时 PATCH 到 qty≠1 拒绝 MALL_20005（qty=1 本身是幂等放行——
+	// 统一口径"订阅行 qty 必须 =1"；删除仍走 qty=0）。
+	var gType int8
+	if err := s.db.WithContext(ctx).Raw(
+		"SELECT g.type FROM cart_items c JOIN goods g ON g.id = c.goods_id "+
+			"WHERE c.id = ? AND c.tenant_id = ?", itemID, tenantID).
+		Scan(&gType).Error; err != nil {
+		return nil, fmt.Errorf("mall-order: load cart goods type %d: %w", itemID, err)
+	}
+	if gType == typeSubscription && qty != 1 {
+		return nil, mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+			"订阅商品限购 1 件（不可改数量，删除请用 qty=0）: 行 %d", itemID)
 	}
 	res := s.db.WithContext(ctx).Model(&cartRow{}).
 		Where("id = ? AND tenant_id = ?", itemID, tenantID).
