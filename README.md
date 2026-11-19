@@ -59,6 +59,8 @@ docs/
   plans/                    实现计划 + SDD 执行台账归档（每个里程碑的完整审查记录）
 services/ai-gateway/         既有 AI 网关（整仓迁入，模块路径不变；仅 5 个加法 RPC，内核零改动）
 services/{mall-bff,mall-goods,mall-order}   商城三服务（根模块）
+services/mall-gen                     mall gRPC 生成物（make proto 输出，勿手改）
+services/seckill                      秒杀服务（R4 占位）
 eval/ai-gateway/             统一评测资产（R2.6-T2 自 services/ai-gateway/eval 提为顶层；数据集入库、运行产物忽略；规约见 eval/README.md）
 pkg/{mallerr,mallpage,importguard}          错误码/游标分页/跨模块 import 守卫
 proto/mall/v1/              商城侧 gRPC 契约（make proto 生成）

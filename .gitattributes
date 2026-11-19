@@ -1,0 +1,30 @@
+# Frozen evidence must retain exact bytes across Windows and Unix checkouts.
+# R2.6 审计修复：eval 规则自 services/ai-gateway/ 上移并重锚（原作用域已不覆盖顶层 eval/）
+eval/ai-gateway/paired-pilots/2026-10-17-jev-acceptance-v1/** -text
+eval/ai-gateway/paired-pilots/2026-10-17-four-task-retest-v1/** -text
+eval/ai-gateway/jev-offline-readiness/** -text
+eval/ai-gateway/baselines/2026-09-29-v1-v2/** -text
+eval/ai-gateway/experiments/2026-10-08/** -text
+eval/ai-gateway/experiments/2026-10-08-deepseek-flash/** -text
+eval/ai-gateway/experiments/2026-10-08-jev-fast-path/** -text
+eval/ai-gateway/behavior-review/** -text
+eval/ai-gateway/annotations/2026-10-09-intent-contract-v1/** -text
+eval/ai-gateway/reviews/2026-10-09-intent-offline-audit/** -text
+eval/ai-gateway/contracts/** -text
+eval/ai-gateway/intent-suite/** -text
+eval/ai-gateway/task-suites/2026-10-09-boundary-dev-v1/** -text
+eval/ai-gateway/task-suites/2026-10-11-read-fixtures-dev-v1/** -text
+eval/ai-gateway/task-definitions/2026-10-12-full-dev-v1/** -text
+eval/ai-gateway/runtime-profiles/2026-10-13-six-profiles-v1/** -text
+eval/ai-gateway/code-snapshots/** -text
+eval/ai-gateway/conversation-regressions/** -text
+eval/ai-gateway/conversation-regressions/2026-10-13-agent-local-v1/events.jsonl whitespace=cr-at-eol
+eval/ai-gateway/reviews/2026-10-13-answer-evidence-v1/** -text
+eval/ai-gateway/paired-pilots/2026-10-13-dev-v1/** -text
+eval/ai-gateway/paired-pilots/2026-10-14-four-task-v1/** -text whitespace=cr-at-eol
+eval/ai-gateway/paired-pilots/2026-10-14-full-preflight-v1/** -text
+eval/ai-gateway/paired-pilots/2026-10-15-langfuse-local-v1/** -text
+eval/ai-gateway/paired-pilots/2026-10-15-observed-preflight-v2/** -text
+eval/ai-gateway/paired-pilots/2026-10-15-langfuse-content-scores-v1/** -text
+eval/ai-gateway/langfuse-workbench/2026-10-15-v1/** -text whitespace=cr-at-eol
+eval/ai-gateway/paired-pilots/2026-10-16-langfuse-workbench-preflight-v3/** -text whitespace=cr-at-eol

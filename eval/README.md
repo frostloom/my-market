@@ -33,7 +33,7 @@
 - git pathspec 类消费者（`cmd/paired-live/guards.go` 的冻结输入审查）：以**仓库根为基准**写作 `eval/ai-gateway/task-definitions` 等。
 - Node 工具（`web/scripts/gen-intent-suite.mjs` / `verify-intent-suite.mjs`）：以脚本自身位置推导，`resolve(here, '..', '..', '..', '..', 'eval', 'ai-gateway', ...)`（web/scripts 距仓库根 4 层）。
 - 新工具若需要 cwd 无关的定位，约定用 **env 覆盖**（如 `EVAL_DIR` 指向 `eval/ai-gateway`），缺省回退上述相对路径；不要发明第三种默认值。
-- scripts/ 下的 Python/PowerShell 工具以脚本自身位置推导 `ROOT` 后拼 `eval/` 路径：R2.6-T2 起改拼 `ROOT.parent / eval / ai-gateway`；仅服务于**历史冻结证据**的工具（`scripts/tests/test_historical_evidence_checkout.py`、`scripts/helpers/*.go.txt`、window v6/v10 分类器与 `internal/taskbench/window_actual_ready.go` 的冻结清单契约）保留旧布局路径原文——它们校验的是历史仓快照，不定位活树。
+- scripts/ 下的 Python/PowerShell 工具以脚本自身位置推导 `ROOT` 后拼 `eval/` 路径：R2.6-T2 起改拼 `ROOT.parent / eval / ai-gateway`；仅服务于**历史冻结证据**的工具（`services/ai-gateway/scripts/tests/test_historical_evidence_checkout.py`、`services/ai-gateway/scripts/helpers/*.go.txt`、window v6/v10 分类器与 `internal/taskbench/window_actual_ready.go` 的冻结清单契约）保留旧布局路径原文——它们校验的是历史仓快照，不定位活树。
 
 ## 历史口径提示
 

@@ -1,5 +1,7 @@
 # 里程碑验收清单（spec/acceptance.md）
 
+> **ai-gateway 全量测试门禁口径（R2.6 固化）**：空闲机 + `CGO_ENABLED=0` 下，失败**名集合**与基线逐名恒等（taskbench 失败计数随机器负载漂移，空闲 ~80/满载可降至 ~17——只比集合不比数字；判据=「0 个基线之外的新增失败」）。
+
 > 每项可执行、可判定（命令级）；全绿才算里程碑完成。引用：[PRD.md](../PRD.md) §13。
 
 ---
@@ -52,6 +54,12 @@
 - [x] 混合单（general+月卡）支付后：general 行发货 done、月卡行订阅生效、订单 fulfilled
 - [x] 月卡生效后推理：窗口额度内 funding=subscription、余额不动（/me/overview 验证）；超额 402
 - [x] 退款：混合单 fulfilled 退款 → general 行回补、月卡行退订语义（当期保留、不退费）
+
+## R2.6 仓库结构统一（计划外里程碑，2026-11-19）
+
+- [x] ai-gateway 整体迁入 services/（17,075 文件 100% rename，零语义改动；门禁三连绿）
+- [x] eval/ 提升为顶层统一资产（15,682 rename + 三类引用锚定 + Node 工具链修复 + 资产规约 README）
+- [x] 测试门禁口径固化（空闲机+CGO=0+失败名集合恒等，见头部）+ 冻结证据 .gitattributes 上移根（审计修复）
 
 ## R3 K8s 化（七项逐一验收）
 
