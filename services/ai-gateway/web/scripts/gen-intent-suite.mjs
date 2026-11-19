@@ -1,21 +1,23 @@
 /**
  * 意图路由评测集生成器。
  *
- * 设计原则（借鉴 CLINC150 / Banking77 的方法论，见 ../eval/intent-suite/DESIGN.md）：
+ * 设计原则（借鉴 CLINC150 / Banking77 的方法论，见 eval/ai-gateway/intent-suite/DESIGN.md）：
  *   1. 每类恰好 100 条 —— 均衡，避免指标被大类主导
  *   2. 说法维度覆盖真实分布：标准 / 口语 / 错别字 / 极简 / 啰嗦 / 间接 / 中英混 / 礼貌 / 命令
  *   3. 域外（OOS）类独立，测「会不会乱调工具」
  *   4. 全部为**手写模板 + 槽位组合**，不是 LLM 自由生成 —— 保证标注确定、可复现、可审校
  *
  * 用法：node web/scripts/gen-intent-suite.mjs
- * 输出：eval/intent-suite/*.json
+ * 输出：eval/ai-gateway/intent-suite/*.json
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const outDir = resolve(here, '..', '..', 'eval', 'intent-suite')
+// R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway（见 eval/README.md）；web/scripts 距仓库根 4 层
+const evalRoot = resolve(here, '..', '..', '..', '..', 'eval', 'ai-gateway')
+const outDir = resolve(evalRoot, 'intent-suite')
 mkdirSync(outDir, { recursive: true })
 
 /** 维度配额：每类 100 条按此分布，保证每个维度都有足够样本单独统计 */

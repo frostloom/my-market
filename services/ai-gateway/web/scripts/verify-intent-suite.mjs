@@ -7,7 +7,8 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const dir = resolve(here, '..', '..', 'eval', 'intent-suite')
+// R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway（见 eval/README.md）；web/scripts 距仓库根 4 层
+const dir = resolve(here, '..', '..', '..', '..', 'eval', 'ai-gateway', 'intent-suite')
 
 const manifest = JSON.parse(readFileSync(resolve(dir, 'manifest.json'), 'utf8'))
 const files = readdirSync(dir).filter(f => f.endsWith('.json') && f !== 'manifest.json')
