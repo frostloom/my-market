@@ -1229,6 +1229,245 @@ func (s *Store) RenewDueSubscriptions(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// ---------- R2.5 商城月卡闭环：ActivateSubscription / CancelSubscriptionRef（纯新增，不动既有订阅路径） ----------
+
+// TopupSubActivateRefType 订阅开通幂等锚的 ref_type（复用 topups 复合唯一键 uk_topup_ref）。
+const TopupSubActivateRefType = "mall-sub"
+
+// ActivateResult 开通/续期结果。
+type ActivateResult struct {
+	Sub       *Subscription // 生效中的订阅行（重放时为当前订阅；可能为 nil）
+	Activated bool          // true=本次调用生效（开通或续一期）；false=同 ref 重放 no-op
+	IsRenewal bool          // true=本次为续一期（自本期期满顺延一个周期）
+}
+
+// ActivateSubscription 开通/续期月卡（R2.5 gRPC 入口）：
+//   - 无本期权益 → 按 plan 开通本期（模拟月费校验：套餐在售且为定期订阅即可，不接真钱、不动余额）；
+//   - 已有本期权益（active/cancelled 且未到期）→ 自本期期满顺延一个周期，即 RenewDueSubscriptions
+//     的单租户等价（newStart=旧 cycle_end 无缝衔接、cycle_num+1）；显式续购同时复活 auto_renew；
+//     跨套餐 fail-closed（换套餐走既有 ChangePlan「下期生效」口径，不在购买路径静默变更）；
+//   - 已过期未续（stale active，到期标记无人写）→ 从 now 起新一期（原行续用，不新增 active 行）。
+//
+// 幂等锚复用 topups uk_ref（零 schema 改动）：订阅行无 ref 列，改为同事务写一条 0 元流水
+// （source=subscription, ref_type="mall-sub", ref_id=ref）作为提交点——余额公式 Σtopups 不受
+// 0 元行影响，且天然成为程序化开通的审计流水。同 ref 重放 no-op 返回当前订阅（重放载荷不一致
+// 不动订阅，与 Credit「重放不校验金额」同口径）；跨租户 ref → FailedPrecondition（与 Credit 同口径）。
+func (s *Store) ActivateSubscription(ctx context.Context, tenantID, planID uint64, ref string) (*ActivateResult, error) {
+	if tenantID == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "tenant_id 必须 > 0")
+	}
+	if planID == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "plan_id 必须 > 0")
+	}
+	if ref == "" || len(ref) > 64 {
+		return nil, status.Errorf(codes.InvalidArgument, "ref 长度须为 1-64")
+	}
+	if err := s.requireActiveTenant(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	// 月费校验（模拟，不接真钱）：套餐在售且为定期订阅。
+	p, err := s.GetPlan(ctx, planID)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, status.Errorf(codes.NotFound, "plan not found: %d", planID)
+	}
+	if p.Status != 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "套餐已下架: %s", p.Name)
+	}
+	if p.PlanType != PlanTypeRecurring {
+		return nil, status.Errorf(codes.FailedPrecondition, "仅定期订阅可开通: %s", p.Name)
+	}
+	// 与充值/退款/退订/并发开通互斥（每租户现金锁）：续期判定与写入必须串行。
+	locked, release, err := s.lockCash(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return locked.activateSubscriptionCash(locked.cashSQLContext(), tenantID, p, ref)
+}
+
+func (s *Store) activateSubscriptionCash(ctx context.Context, tenantID uint64, p *Plan, ref string) (*ActivateResult, error) {
+	// 幂等预读：同 ref 已激活过 → no-op 返回当前订阅。
+	var marker Topup
+	err := s.db.WithContext(ctx).Where("ref_type = ? AND ref_id = ?", TopupSubActivateRefType, ref).First(&marker).Error
+	if err == nil {
+		if marker.TenantID != tenantID {
+			return nil, status.Errorf(codes.FailedPrecondition, "ref 已被其他租户使用: %s/%s", TopupSubActivateRefType, ref)
+		}
+		sub, subErr := s.getEntitledRecurring(ctx, tenantID)
+		if subErr != nil {
+			return nil, subErr
+		}
+		return &ActivateResult{Sub: sub, Activated: false}, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	now := time.Now()
+	period := time.Duration(p.ValidityDays) * 24 * time.Hour
+	if period <= 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "套餐计费周期非法: %s", p.Name)
+	}
+	entitled, err := s.getEntitledRecurring(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if entitled != nil {
+		// 同套餐才续期；跨套餐 fail-closed。
+		nextPlanID := entitled.PlanID
+		if entitled.PendingPlanID != nil {
+			nextPlanID = *entitled.PendingPlanID
+		}
+		if nextPlanID != p.ID {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"已有其他套餐的未到期订阅（套餐#%d），续购须同套餐；换套餐走 ChangePlan 口径", nextPlanID)
+		}
+	}
+	if err := s.cashMutationAllowed(); err != nil {
+		return nil, err
+	}
+	markerInserted := false
+	var result *ActivateResult
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 0 元激活锚：uk_topup_ref 是幂等提交点；0 元不进余额公式（Σtopups 不变）。
+		inserted, err := insertTopup(tx, &Topup{TenantID: tenantID, Source: TopupSubscription, Amount: 0, RefType: TopupSubActivateRefType, RefID: ref, CreatedAt: now})
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			// 并发重放撞 uk_ref（提交点被预读到事务之间落库的获胜行占用）。
+			// 口径与预读一致：复核获胜行租户，跨租户 fail-closed，不给错误租户静默 no-op；
+			// 同租户并发按重放处理（获胜方已变更订阅，本方跳过写入）。
+			var winner Topup
+			if err := tx.Where("ref_type = ? AND ref_id = ?", TopupSubActivateRefType, ref).First(&winner).Error; err != nil {
+				return err
+			}
+			if winner.TenantID != tenantID {
+				return status.Errorf(codes.FailedPrecondition, "ref 已被其他租户使用: %s/%s", TopupSubActivateRefType, ref)
+			}
+			return nil
+		}
+		markerInserted = true
+		switch {
+		case entitled == nil:
+			// 首次开通（含历史 cancelled 已过期的租户：无本期权益 → 新行）。
+			start := now
+			end := now.Add(period)
+			row := &Subscription{
+				TenantID: tenantID, PlanID: p.ID, PlanType: p.PlanType,
+				Status: SubActive, AutoRenew: true,
+				CycleStart: &start, CycleEnd: &end,
+				CycleNum: 1, QuotaGranted: 0, // 额度资格，无钱可授
+				CreatedAt: now, UpdatedAt: now,
+			}
+			if err := tx.Create(row).Error; err != nil {
+				return err
+			}
+			result = &ActivateResult{Sub: row, Activated: true}
+		case entitled.CycleEnd != nil && entitled.CycleEnd.After(now):
+			// 未到期续一期（active 或退订未到期的当期权益）：RenewDue 单租户等价——
+			// newStart=旧 end（当期权益无缝），cycle_num+1；显式续购复活 auto_renew、
+			// 清 cancelled/pending（同套餐校验已通过，视同 pending 已应用）。
+			newStart := *entitled.CycleEnd
+			newEnd := newStart.Add(period)
+			if err := tx.Model(&Subscription{}).Where("id = ?", entitled.ID).Updates(map[string]any{
+				"cycle_start": newStart, "cycle_end": newEnd,
+				"cycle_num": entitled.CycleNum + 1,
+				"status":    SubActive, "auto_renew": true,
+				"pending_plan_id": nil, "cancelled_at": nil, "updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			row := *entitled
+			row.CycleStart, row.CycleEnd, row.CycleNum = &newStart, &newEnd, entitled.CycleNum+1
+			row.Status, row.AutoRenew, row.PendingPlanID, row.CancelledAt = SubActive, true, nil, nil
+			result = &ActivateResult{Sub: &row, Activated: true, IsRenewal: true}
+		default:
+			// 已过期未续（stale active）：从 now 起新一期，原行续用（同租户至多一条 active）。
+			start := now
+			end := now.Add(period)
+			if err := tx.Model(&Subscription{}).Where("id = ?", entitled.ID).Updates(map[string]any{
+				"plan_id": p.ID, "cycle_start": start, "cycle_end": end,
+				"cycle_num": entitled.CycleNum + 1,
+				"status":    SubActive, "auto_renew": true,
+				"pending_plan_id": nil, "cancelled_at": nil, "updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			row := *entitled
+			row.PlanID = p.ID
+			row.CycleStart, row.CycleEnd, row.CycleNum = &start, &end, entitled.CycleNum+1
+			row.Status, row.AutoRenew, row.PendingPlanID, row.CancelledAt = SubActive, true, nil, nil
+			result = &ActivateResult{Sub: &row, Activated: true, IsRenewal: true}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if !markerInserted {
+		// 同租户并发重放：获胜方已生效，本方按 no-op 返回当前订阅。
+		sub, subErr := s.getEntitledRecurring(ctx, tenantID)
+		if subErr != nil {
+			return nil, subErr
+		}
+		return &ActivateResult{Sub: sub, Activated: false}, nil
+	}
+	return result, nil
+}
+
+// CancelSubscriptionRef 退订（R2.5 gRPC 入口，与 portal/agent 既有 CancelSubscription 并存，
+// 不改其行为）：置 auto_renew=0、当期权益保留至期满、不退费（D15）。幂等来自状态定点收敛：
+// 已退订（含当期权益中的 cancelled）→ 返回当前订阅与 cancelled=false；无任何生效/当期订阅 →
+// NotFound。ref 校验 1-64 并由调用方记入审计日志——不落账本行（退订不动钱，0 元流水反而是
+// 账本噪音；激活锚的 0 元行有 uk_ref 提交点职责，退订没有）。
+func (s *Store) CancelSubscriptionRef(ctx context.Context, tenantID uint64, ref string) (*Subscription, bool, error) {
+	if tenantID == 0 {
+		return nil, false, status.Errorf(codes.InvalidArgument, "tenant_id 必须 > 0")
+	}
+	if ref == "" || len(ref) > 64 {
+		return nil, false, status.Errorf(codes.InvalidArgument, "ref 长度须为 1-64")
+	}
+	if err := s.requireActiveTenant(ctx, tenantID); err != nil {
+		return nil, false, err
+	}
+	locked, release, err := s.lockCash(ctx, tenantID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	ctx = locked.cashSQLContext()
+
+	sub, err := locked.GetActiveRecurring(ctx, tenantID)
+	if err != nil {
+		return nil, false, err
+	}
+	if sub != nil {
+		now := time.Now()
+		res := locked.db.WithContext(ctx).Model(&Subscription{}).
+			Where("id = ? AND status = ?", sub.ID, SubActive).
+			Updates(map[string]any{"auto_renew": false, "status": SubCancelled, "cancelled_at": now, "updated_at": now})
+		if res.Error != nil {
+			return nil, false, res.Error
+		}
+		if res.RowsAffected != 1 {
+			return nil, false, status.Errorf(codes.Aborted, "订阅状态已变化，请重试")
+		}
+		sub.Status, sub.AutoRenew, sub.CancelledAt = SubCancelled, false, &now
+		return sub, true, nil
+	}
+	entitled, err := locked.getEntitledRecurring(ctx, tenantID)
+	if err != nil {
+		return nil, false, err
+	}
+	if entitled != nil {
+		// 已退订的当期权益订阅：重放 no-op。
+		return entitled, false, nil
+	}
+	return nil, false, status.Errorf(codes.NotFound, "无生效中的订阅")
+}
+
 // ---------- AI 会话 / 审计 ----------
 
 // RecordSession 记录/刷新客服会话。

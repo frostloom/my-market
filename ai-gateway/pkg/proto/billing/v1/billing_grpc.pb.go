@@ -28,15 +28,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	BillingService_Reserve_FullMethodName        = "/billing.v1.BillingService/Reserve"
-	BillingService_ReportUsage_FullMethodName    = "/billing.v1.BillingService/ReportUsage"
-	BillingService_Settle_FullMethodName         = "/billing.v1.BillingService/Settle"
-	BillingService_Reverse_FullMethodName        = "/billing.v1.BillingService/Reverse"
-	BillingService_GetBalance_FullMethodName     = "/billing.v1.BillingService/GetBalance"
-	BillingService_ValidateAPIKey_FullMethodName = "/billing.v1.BillingService/ValidateAPIKey"
-	BillingService_RebuildBalance_FullMethodName = "/billing.v1.BillingService/RebuildBalance"
-	BillingService_Credit_FullMethodName         = "/billing.v1.BillingService/Credit"
-	BillingService_Refund_FullMethodName         = "/billing.v1.BillingService/Refund"
+	BillingService_Reserve_FullMethodName              = "/billing.v1.BillingService/Reserve"
+	BillingService_ReportUsage_FullMethodName          = "/billing.v1.BillingService/ReportUsage"
+	BillingService_Settle_FullMethodName               = "/billing.v1.BillingService/Settle"
+	BillingService_Reverse_FullMethodName              = "/billing.v1.BillingService/Reverse"
+	BillingService_GetBalance_FullMethodName           = "/billing.v1.BillingService/GetBalance"
+	BillingService_ValidateAPIKey_FullMethodName       = "/billing.v1.BillingService/ValidateAPIKey"
+	BillingService_RebuildBalance_FullMethodName       = "/billing.v1.BillingService/RebuildBalance"
+	BillingService_Credit_FullMethodName               = "/billing.v1.BillingService/Credit"
+	BillingService_Refund_FullMethodName               = "/billing.v1.BillingService/Refund"
+	BillingService_ActivateSubscription_FullMethodName = "/billing.v1.BillingService/ActivateSubscription"
+	BillingService_CancelSubscription_FullMethodName   = "/billing.v1.BillingService/CancelSubscription"
 )
 
 // BillingServiceClient is the client API for BillingService service.
@@ -68,6 +70,15 @@ type BillingServiceClient interface {
 	// 退款（R2 商城冲退，加法改造）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
 	// ref 为幂等锚点（topups ref_type="refund", ref_id=ref）。同 ref 重放 no-op：refunded_cent=0。
 	Refund(ctx context.Context, in *RefundRequest, opts ...grpc.CallOption) (*RefundReply, error)
+	// 开通/续期月卡订阅（R2.5 商城月卡闭环，加法改造）：幂等 ref 锚在 topups
+	// （ref_type="mall-sub"，ref_id=ref，0 元流水复用 uk_ref，零 schema 改动）。
+	// 无本期权益 → 按 plan 开通本期（模拟月费校验，不接真钱）；
+	// 已有本期权益 → 自本期期满顺延一个周期（RenewDue 单租户等价，跨套餐 fail-closed）；
+	// 同 ref 重放 no-op 返回当前订阅摘要；跨租户 ref → FailedPrecondition。
+	ActivateSubscription(ctx context.Context, in *ActivateSubscriptionRequest, opts ...grpc.CallOption) (*ActivateSubscriptionReply, error)
+	// 退订（R2.5「退款=退订」语义，加法改造）：置 auto_renew=0、当期权益保留至期满、不退费；
+	// 已退订重放 no-op（定点收敛状态迁移天然幂等，ref 仅作审计关联锚，不落账本行）。
+	CancelSubscription(ctx context.Context, in *CancelSubscriptionRequest, opts ...grpc.CallOption) (*CancelSubscriptionReply, error)
 }
 
 type billingServiceClient struct {
@@ -168,6 +179,26 @@ func (c *billingServiceClient) Refund(ctx context.Context, in *RefundRequest, op
 	return out, nil
 }
 
+func (c *billingServiceClient) ActivateSubscription(ctx context.Context, in *ActivateSubscriptionRequest, opts ...grpc.CallOption) (*ActivateSubscriptionReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActivateSubscriptionReply)
+	err := c.cc.Invoke(ctx, BillingService_ActivateSubscription_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) CancelSubscription(ctx context.Context, in *CancelSubscriptionRequest, opts ...grpc.CallOption) (*CancelSubscriptionReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelSubscriptionReply)
+	err := c.cc.Invoke(ctx, BillingService_CancelSubscription_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BillingServiceServer is the server API for BillingService service.
 // All implementations must embed UnimplementedBillingServiceServer
 // for forward compatibility.
@@ -197,6 +228,15 @@ type BillingServiceServer interface {
 	// 退款（R2 商城冲退，加法改造）：实际退额 = min(amount_cent, 当前余额)，绝不退负；
 	// ref 为幂等锚点（topups ref_type="refund", ref_id=ref）。同 ref 重放 no-op：refunded_cent=0。
 	Refund(context.Context, *RefundRequest) (*RefundReply, error)
+	// 开通/续期月卡订阅（R2.5 商城月卡闭环，加法改造）：幂等 ref 锚在 topups
+	// （ref_type="mall-sub"，ref_id=ref，0 元流水复用 uk_ref，零 schema 改动）。
+	// 无本期权益 → 按 plan 开通本期（模拟月费校验，不接真钱）；
+	// 已有本期权益 → 自本期期满顺延一个周期（RenewDue 单租户等价，跨套餐 fail-closed）；
+	// 同 ref 重放 no-op 返回当前订阅摘要；跨租户 ref → FailedPrecondition。
+	ActivateSubscription(context.Context, *ActivateSubscriptionRequest) (*ActivateSubscriptionReply, error)
+	// 退订（R2.5「退款=退订」语义，加法改造）：置 auto_renew=0、当期权益保留至期满、不退费；
+	// 已退订重放 no-op（定点收敛状态迁移天然幂等，ref 仅作审计关联锚，不落账本行）。
+	CancelSubscription(context.Context, *CancelSubscriptionRequest) (*CancelSubscriptionReply, error)
 	mustEmbedUnimplementedBillingServiceServer()
 }
 
@@ -233,6 +273,12 @@ func (UnimplementedBillingServiceServer) Credit(context.Context, *CreditRequest)
 }
 func (UnimplementedBillingServiceServer) Refund(context.Context, *RefundRequest) (*RefundReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Refund not implemented")
+}
+func (UnimplementedBillingServiceServer) ActivateSubscription(context.Context, *ActivateSubscriptionRequest) (*ActivateSubscriptionReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method ActivateSubscription not implemented")
+}
+func (UnimplementedBillingServiceServer) CancelSubscription(context.Context, *CancelSubscriptionRequest) (*CancelSubscriptionReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelSubscription not implemented")
 }
 func (UnimplementedBillingServiceServer) mustEmbedUnimplementedBillingServiceServer() {}
 func (UnimplementedBillingServiceServer) testEmbeddedByValue()                        {}
@@ -417,6 +463,42 @@ func _BillingService_Refund_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BillingService_ActivateSubscription_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ActivateSubscriptionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).ActivateSubscription(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_ActivateSubscription_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).ActivateSubscription(ctx, req.(*ActivateSubscriptionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_CancelSubscription_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelSubscriptionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).CancelSubscription(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_CancelSubscription_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).CancelSubscription(ctx, req.(*CancelSubscriptionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BillingService_ServiceDesc is the grpc.ServiceDesc for BillingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -459,6 +541,14 @@ var BillingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Refund",
 			Handler:    _BillingService_Refund_Handler,
+		},
+		{
+			MethodName: "ActivateSubscription",
+			Handler:    _BillingService_ActivateSubscription_Handler,
+		},
+		{
+			MethodName: "CancelSubscription",
+			Handler:    _BillingService_CancelSubscription_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

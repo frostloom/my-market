@@ -172,6 +172,71 @@ func (s *Service) Refund(ctx context.Context, req *billingv1.RefundRequest) (*bi
 	return &billingv1.RefundReply{RefundedCent: refunded}, nil
 }
 
+// ActivateSubscription 开通/续期月卡（R2.5，幂等）：无本期权益按 plan 开通本期（模拟月费校验
+// 不接真钱），已有本期权益自本期期满顺延一个周期；同 ref 重放 no-op 返回当前订阅摘要；
+// 校验失败/跨租户 ref 由 store 返回 InvalidArgument/NotFound/FailedPrecondition。
+func (s *Service) ActivateSubscription(ctx context.Context, req *billingv1.ActivateSubscriptionRequest) (*billingv1.ActivateSubscriptionReply, error) {
+	res, err := s.store.ActivateSubscription(ctx, uint64(req.TenantId), uint64(req.PlanId), req.Ref)
+	if err != nil {
+		return nil, err
+	}
+	cycleNum := int64(0)
+	if res.Sub != nil {
+		cycleNum = int64(res.Sub.CycleNum)
+	}
+	s.log.Info("activate subscription",
+		"tenant_id", req.TenantId,
+		"plan_id", req.PlanId,
+		"ref", req.Ref,
+		"activated", res.Activated,
+		"is_renewal", res.IsRenewal,
+		"cycle_num", cycleNum,
+	)
+	return &billingv1.ActivateSubscriptionReply{
+		Activated:    res.Activated,
+		IsRenewal:    res.IsRenewal,
+		Subscription: subscriptionSummary(res.Sub),
+	}, nil
+}
+
+// CancelSubscription 退订（R2.5「退款=退订」语义，幂等）：置 auto_renew=0、当期权益保留至期满、
+// 不退费；已退订重放 cancelled=false（no-op）；无订阅 → NotFound。
+func (s *Service) CancelSubscription(ctx context.Context, req *billingv1.CancelSubscriptionRequest) (*billingv1.CancelSubscriptionReply, error) {
+	sub, cancelled, err := s.store.CancelSubscriptionRef(ctx, uint64(req.TenantId), req.Ref)
+	if err != nil {
+		return nil, err
+	}
+	s.log.Info("cancel subscription",
+		"tenant_id", req.TenantId,
+		"ref", req.Ref,
+		"cancelled", cancelled,
+	)
+	return &billingv1.CancelSubscriptionReply{
+		Cancelled:    cancelled,
+		Subscription: subscriptionSummary(sub),
+	}, nil
+}
+
+// subscriptionSummary 订阅行 → RPC 摘要（nil → 全零值摘要）。
+func subscriptionSummary(sub *store.Subscription) *billingv1.SubscriptionSummary {
+	if sub == nil {
+		return &billingv1.SubscriptionSummary{}
+	}
+	out := &billingv1.SubscriptionSummary{
+		PlanId:    int64(sub.PlanID),
+		Status:    sub.Status,
+		AutoRenew: sub.AutoRenew,
+		CycleNum:  int64(sub.CycleNum),
+	}
+	if sub.CycleStart != nil {
+		out.PeriodStart = sub.CycleStart.Unix()
+	}
+	if sub.CycleEnd != nil {
+		out.PeriodEnd = sub.CycleEnd.Unix()
+	}
+	return out
+}
+
 func settleUsageContext(ctx context.Context) (context.Context, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	prompt := md.Get(controlplane.SettlePromptKey)

@@ -1082,6 +1082,315 @@ func (x *RefundReply) GetRefundedCent() int64 {
 	return 0
 }
 
+// SubscriptionSummary 订阅摘要（开通/退订 RPC 的返回；无订阅时各字段零值）。
+type SubscriptionSummary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlanId        int64                  `protobuf:"varint,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`                // 生效套餐
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                               // active/cancelled；无订阅为空
+	AutoRenew     bool                   `protobuf:"varint,3,opt,name=auto_renew,json=autoRenew,proto3" json:"auto_renew,omitempty"`       // 到期自动续费
+	CycleNum      int64                  `protobuf:"varint,4,opt,name=cycle_num,json=cycleNum,proto3" json:"cycle_num,omitempty"`          // 已续期数
+	PeriodStart   int64                  `protobuf:"varint,5,opt,name=period_start,json=periodStart,proto3" json:"period_start,omitempty"` // 本期起（Unix 秒）；0=无订阅
+	PeriodEnd     int64                  `protobuf:"varint,6,opt,name=period_end,json=periodEnd,proto3" json:"period_end,omitempty"`       // 本期止（Unix 秒）；0=无订阅
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscriptionSummary) Reset() {
+	*x = SubscriptionSummary{}
+	mi := &file_billing_v1_billing_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscriptionSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscriptionSummary) ProtoMessage() {}
+
+func (x *SubscriptionSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscriptionSummary.ProtoReflect.Descriptor instead.
+func (*SubscriptionSummary) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SubscriptionSummary) GetPlanId() int64 {
+	if x != nil {
+		return x.PlanId
+	}
+	return 0
+}
+
+func (x *SubscriptionSummary) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *SubscriptionSummary) GetAutoRenew() bool {
+	if x != nil {
+		return x.AutoRenew
+	}
+	return false
+}
+
+func (x *SubscriptionSummary) GetCycleNum() int64 {
+	if x != nil {
+		return x.CycleNum
+	}
+	return 0
+}
+
+func (x *SubscriptionSummary) GetPeriodStart() int64 {
+	if x != nil {
+		return x.PeriodStart
+	}
+	return 0
+}
+
+func (x *SubscriptionSummary) GetPeriodEnd() int64 {
+	if x != nil {
+		return x.PeriodEnd
+	}
+	return 0
+}
+
+type ActivateSubscriptionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      int64                  `protobuf:"varint,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	PlanId        int64                  `protobuf:"varint,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"` // 必须为在售（status=0）定期订阅套餐
+	Ref           string                 `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`                      // 幂等锚点（topups ref_type="mall-sub"，ref_id=ref）；1-64 字符
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivateSubscriptionRequest) Reset() {
+	*x = ActivateSubscriptionRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivateSubscriptionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivateSubscriptionRequest) ProtoMessage() {}
+
+func (x *ActivateSubscriptionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivateSubscriptionRequest.ProtoReflect.Descriptor instead.
+func (*ActivateSubscriptionRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ActivateSubscriptionRequest) GetTenantId() int64 {
+	if x != nil {
+		return x.TenantId
+	}
+	return 0
+}
+
+func (x *ActivateSubscriptionRequest) GetPlanId() int64 {
+	if x != nil {
+		return x.PlanId
+	}
+	return 0
+}
+
+func (x *ActivateSubscriptionRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+type ActivateSubscriptionReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Activated     bool                   `protobuf:"varint,1,opt,name=activated,proto3" json:"activated,omitempty"`                  // true=本次生效（开通或续一期）；false=同 ref 重放 no-op
+	IsRenewal     bool                   `protobuf:"varint,2,opt,name=is_renewal,json=isRenewal,proto3" json:"is_renewal,omitempty"` // true=本次为续一期（自本期期满顺延一个周期）
+	Subscription  *SubscriptionSummary   `protobuf:"bytes,3,opt,name=subscription,proto3" json:"subscription,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivateSubscriptionReply) Reset() {
+	*x = ActivateSubscriptionReply{}
+	mi := &file_billing_v1_billing_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivateSubscriptionReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivateSubscriptionReply) ProtoMessage() {}
+
+func (x *ActivateSubscriptionReply) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivateSubscriptionReply.ProtoReflect.Descriptor instead.
+func (*ActivateSubscriptionReply) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ActivateSubscriptionReply) GetActivated() bool {
+	if x != nil {
+		return x.Activated
+	}
+	return false
+}
+
+func (x *ActivateSubscriptionReply) GetIsRenewal() bool {
+	if x != nil {
+		return x.IsRenewal
+	}
+	return false
+}
+
+func (x *ActivateSubscriptionReply) GetSubscription() *SubscriptionSummary {
+	if x != nil {
+		return x.Subscription
+	}
+	return nil
+}
+
+type CancelSubscriptionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      int64                  `protobuf:"varint,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Ref           string                 `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"` // 审计关联锚；1-64 字符（幂等来自状态定点收敛，见服务注释）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelSubscriptionRequest) Reset() {
+	*x = CancelSubscriptionRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelSubscriptionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelSubscriptionRequest) ProtoMessage() {}
+
+func (x *CancelSubscriptionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelSubscriptionRequest.ProtoReflect.Descriptor instead.
+func (*CancelSubscriptionRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *CancelSubscriptionRequest) GetTenantId() int64 {
+	if x != nil {
+		return x.TenantId
+	}
+	return 0
+}
+
+func (x *CancelSubscriptionRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+type CancelSubscriptionReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cancelled     bool                   `protobuf:"varint,1,opt,name=cancelled,proto3" json:"cancelled,omitempty"` // true=本次置退订；false=已退订（no-op）
+	Subscription  *SubscriptionSummary   `protobuf:"bytes,2,opt,name=subscription,proto3" json:"subscription,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelSubscriptionReply) Reset() {
+	*x = CancelSubscriptionReply{}
+	mi := &file_billing_v1_billing_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelSubscriptionReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelSubscriptionReply) ProtoMessage() {}
+
+func (x *CancelSubscriptionReply) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelSubscriptionReply.ProtoReflect.Descriptor instead.
+func (*CancelSubscriptionReply) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *CancelSubscriptionReply) GetCancelled() bool {
+	if x != nil {
+		return x.Cancelled
+	}
+	return false
+}
+
+func (x *CancelSubscriptionReply) GetSubscription() *SubscriptionSummary {
+	if x != nil {
+		return x.Subscription
+	}
+	return nil
+}
+
 var File_billing_v1_billing_proto protoreflect.FileDescriptor
 
 const file_billing_v1_billing_proto_rawDesc = "" +
@@ -1161,13 +1470,37 @@ const file_billing_v1_billing_proto_rawDesc = "" +
 	"amountCent\x12\x10\n" +
 	"\x03ref\x18\x03 \x01(\tR\x03ref\"2\n" +
 	"\vRefundReply\x12#\n" +
-	"\rrefunded_cent\x18\x01 \x01(\x03R\frefundedCent*e\n" +
+	"\rrefunded_cent\x18\x01 \x01(\x03R\frefundedCent\"\xc4\x01\n" +
+	"\x13SubscriptionSummary\x12\x17\n" +
+	"\aplan_id\x18\x01 \x01(\x03R\x06planId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1d\n" +
+	"\n" +
+	"auto_renew\x18\x03 \x01(\bR\tautoRenew\x12\x1b\n" +
+	"\tcycle_num\x18\x04 \x01(\x03R\bcycleNum\x12!\n" +
+	"\fperiod_start\x18\x05 \x01(\x03R\vperiodStart\x12\x1d\n" +
+	"\n" +
+	"period_end\x18\x06 \x01(\x03R\tperiodEnd\"e\n" +
+	"\x1bActivateSubscriptionRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\x03R\btenantId\x12\x17\n" +
+	"\aplan_id\x18\x02 \x01(\x03R\x06planId\x12\x10\n" +
+	"\x03ref\x18\x03 \x01(\tR\x03ref\"\x9d\x01\n" +
+	"\x19ActivateSubscriptionReply\x12\x1c\n" +
+	"\tactivated\x18\x01 \x01(\bR\tactivated\x12\x1d\n" +
+	"\n" +
+	"is_renewal\x18\x02 \x01(\bR\tisRenewal\x12C\n" +
+	"\fsubscription\x18\x03 \x01(\v2\x1f.billing.v1.SubscriptionSummaryR\fsubscription\"J\n" +
+	"\x19CancelSubscriptionRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\x03R\btenantId\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\"|\n" +
+	"\x17CancelSubscriptionReply\x12\x1c\n" +
+	"\tcancelled\x18\x01 \x01(\bR\tcancelled\x12C\n" +
+	"\fsubscription\x18\x02 \x01(\v2\x1f.billing.v1.SubscriptionSummaryR\fsubscription*e\n" +
 	"\vReserveCode\x12\x0e\n" +
 	"\n" +
 	"RESERVE_OK\x10\x00\x12\x18\n" +
 	"\x14RESERVE_INSUFFICIENT\x10\x01\x12\x15\n" +
 	"\x11RESERVE_DUPLICATE\x10\x02\x12\x15\n" +
-	"\x11RESERVE_SUB_QUOTA\x10\x032\xa4\x05\n" +
+	"\x11RESERVE_SUB_QUOTA\x10\x032\xee\x06\n" +
 	"\x0eBillingService\x12B\n" +
 	"\aReserve\x12\x1a.billing.v1.ReserveRequest\x1a\x1b.billing.v1.ReserveResponse\x12N\n" +
 	"\vReportUsage\x12\x1e.billing.v1.ReportUsageRequest\x1a\x1f.billing.v1.ReportUsageResponse\x12?\n" +
@@ -1178,7 +1511,9 @@ const file_billing_v1_billing_proto_rawDesc = "" +
 	"\x0eValidateAPIKey\x12!.billing.v1.ValidateAPIKeyRequest\x1a\".billing.v1.ValidateAPIKeyResponse\x12W\n" +
 	"\x0eRebuildBalance\x12!.billing.v1.RebuildBalanceRequest\x1a\".billing.v1.RebuildBalanceResponse\x12<\n" +
 	"\x06Credit\x12\x19.billing.v1.CreditRequest\x1a\x17.billing.v1.CreditReply\x12<\n" +
-	"\x06Refund\x12\x19.billing.v1.RefundRequest\x1a\x17.billing.v1.RefundReplyB@Z>github.com/frostloom/ai-gateway/pkg/proto/billing/v1;billingv1b\x06proto3"
+	"\x06Refund\x12\x19.billing.v1.RefundRequest\x1a\x17.billing.v1.RefundReply\x12f\n" +
+	"\x14ActivateSubscription\x12'.billing.v1.ActivateSubscriptionRequest\x1a%.billing.v1.ActivateSubscriptionReply\x12`\n" +
+	"\x12CancelSubscription\x12%.billing.v1.CancelSubscriptionRequest\x1a#.billing.v1.CancelSubscriptionReplyB@Z>github.com/frostloom/ai-gateway/pkg/proto/billing/v1;billingv1b\x06proto3"
 
 var (
 	file_billing_v1_billing_proto_rawDescOnce sync.Once
@@ -1193,53 +1528,64 @@ func file_billing_v1_billing_proto_rawDescGZIP() []byte {
 }
 
 var file_billing_v1_billing_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_billing_v1_billing_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_billing_v1_billing_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_billing_v1_billing_proto_goTypes = []any{
-	(ReserveCode)(0),               // 0: billing.v1.ReserveCode
-	(*ReserveRequest)(nil),         // 1: billing.v1.ReserveRequest
-	(*ReserveResponse)(nil),        // 2: billing.v1.ReserveResponse
-	(*ReportUsageRequest)(nil),     // 3: billing.v1.ReportUsageRequest
-	(*ReportUsageResponse)(nil),    // 4: billing.v1.ReportUsageResponse
-	(*SettleRequest)(nil),          // 5: billing.v1.SettleRequest
-	(*SettleResponse)(nil),         // 6: billing.v1.SettleResponse
-	(*ReverseRequest)(nil),         // 7: billing.v1.ReverseRequest
-	(*ReverseResponse)(nil),        // 8: billing.v1.ReverseResponse
-	(*GetBalanceRequest)(nil),      // 9: billing.v1.GetBalanceRequest
-	(*GetBalanceResponse)(nil),     // 10: billing.v1.GetBalanceResponse
-	(*ValidateAPIKeyRequest)(nil),  // 11: billing.v1.ValidateAPIKeyRequest
-	(*ValidateAPIKeyResponse)(nil), // 12: billing.v1.ValidateAPIKeyResponse
-	(*RebuildBalanceRequest)(nil),  // 13: billing.v1.RebuildBalanceRequest
-	(*RebuildBalanceResponse)(nil), // 14: billing.v1.RebuildBalanceResponse
-	(*CreditRequest)(nil),          // 15: billing.v1.CreditRequest
-	(*CreditReply)(nil),            // 16: billing.v1.CreditReply
-	(*RefundRequest)(nil),          // 17: billing.v1.RefundRequest
-	(*RefundReply)(nil),            // 18: billing.v1.RefundReply
+	(ReserveCode)(0),                    // 0: billing.v1.ReserveCode
+	(*ReserveRequest)(nil),              // 1: billing.v1.ReserveRequest
+	(*ReserveResponse)(nil),             // 2: billing.v1.ReserveResponse
+	(*ReportUsageRequest)(nil),          // 3: billing.v1.ReportUsageRequest
+	(*ReportUsageResponse)(nil),         // 4: billing.v1.ReportUsageResponse
+	(*SettleRequest)(nil),               // 5: billing.v1.SettleRequest
+	(*SettleResponse)(nil),              // 6: billing.v1.SettleResponse
+	(*ReverseRequest)(nil),              // 7: billing.v1.ReverseRequest
+	(*ReverseResponse)(nil),             // 8: billing.v1.ReverseResponse
+	(*GetBalanceRequest)(nil),           // 9: billing.v1.GetBalanceRequest
+	(*GetBalanceResponse)(nil),          // 10: billing.v1.GetBalanceResponse
+	(*ValidateAPIKeyRequest)(nil),       // 11: billing.v1.ValidateAPIKeyRequest
+	(*ValidateAPIKeyResponse)(nil),      // 12: billing.v1.ValidateAPIKeyResponse
+	(*RebuildBalanceRequest)(nil),       // 13: billing.v1.RebuildBalanceRequest
+	(*RebuildBalanceResponse)(nil),      // 14: billing.v1.RebuildBalanceResponse
+	(*CreditRequest)(nil),               // 15: billing.v1.CreditRequest
+	(*CreditReply)(nil),                 // 16: billing.v1.CreditReply
+	(*RefundRequest)(nil),               // 17: billing.v1.RefundRequest
+	(*RefundReply)(nil),                 // 18: billing.v1.RefundReply
+	(*SubscriptionSummary)(nil),         // 19: billing.v1.SubscriptionSummary
+	(*ActivateSubscriptionRequest)(nil), // 20: billing.v1.ActivateSubscriptionRequest
+	(*ActivateSubscriptionReply)(nil),   // 21: billing.v1.ActivateSubscriptionReply
+	(*CancelSubscriptionRequest)(nil),   // 22: billing.v1.CancelSubscriptionRequest
+	(*CancelSubscriptionReply)(nil),     // 23: billing.v1.CancelSubscriptionReply
 }
 var file_billing_v1_billing_proto_depIdxs = []int32{
 	0,  // 0: billing.v1.ReserveResponse.code:type_name -> billing.v1.ReserveCode
-	1,  // 1: billing.v1.BillingService.Reserve:input_type -> billing.v1.ReserveRequest
-	3,  // 2: billing.v1.BillingService.ReportUsage:input_type -> billing.v1.ReportUsageRequest
-	5,  // 3: billing.v1.BillingService.Settle:input_type -> billing.v1.SettleRequest
-	7,  // 4: billing.v1.BillingService.Reverse:input_type -> billing.v1.ReverseRequest
-	9,  // 5: billing.v1.BillingService.GetBalance:input_type -> billing.v1.GetBalanceRequest
-	11, // 6: billing.v1.BillingService.ValidateAPIKey:input_type -> billing.v1.ValidateAPIKeyRequest
-	13, // 7: billing.v1.BillingService.RebuildBalance:input_type -> billing.v1.RebuildBalanceRequest
-	15, // 8: billing.v1.BillingService.Credit:input_type -> billing.v1.CreditRequest
-	17, // 9: billing.v1.BillingService.Refund:input_type -> billing.v1.RefundRequest
-	2,  // 10: billing.v1.BillingService.Reserve:output_type -> billing.v1.ReserveResponse
-	4,  // 11: billing.v1.BillingService.ReportUsage:output_type -> billing.v1.ReportUsageResponse
-	6,  // 12: billing.v1.BillingService.Settle:output_type -> billing.v1.SettleResponse
-	8,  // 13: billing.v1.BillingService.Reverse:output_type -> billing.v1.ReverseResponse
-	10, // 14: billing.v1.BillingService.GetBalance:output_type -> billing.v1.GetBalanceResponse
-	12, // 15: billing.v1.BillingService.ValidateAPIKey:output_type -> billing.v1.ValidateAPIKeyResponse
-	14, // 16: billing.v1.BillingService.RebuildBalance:output_type -> billing.v1.RebuildBalanceResponse
-	16, // 17: billing.v1.BillingService.Credit:output_type -> billing.v1.CreditReply
-	18, // 18: billing.v1.BillingService.Refund:output_type -> billing.v1.RefundReply
-	10, // [10:19] is the sub-list for method output_type
-	1,  // [1:10] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	19, // 1: billing.v1.ActivateSubscriptionReply.subscription:type_name -> billing.v1.SubscriptionSummary
+	19, // 2: billing.v1.CancelSubscriptionReply.subscription:type_name -> billing.v1.SubscriptionSummary
+	1,  // 3: billing.v1.BillingService.Reserve:input_type -> billing.v1.ReserveRequest
+	3,  // 4: billing.v1.BillingService.ReportUsage:input_type -> billing.v1.ReportUsageRequest
+	5,  // 5: billing.v1.BillingService.Settle:input_type -> billing.v1.SettleRequest
+	7,  // 6: billing.v1.BillingService.Reverse:input_type -> billing.v1.ReverseRequest
+	9,  // 7: billing.v1.BillingService.GetBalance:input_type -> billing.v1.GetBalanceRequest
+	11, // 8: billing.v1.BillingService.ValidateAPIKey:input_type -> billing.v1.ValidateAPIKeyRequest
+	13, // 9: billing.v1.BillingService.RebuildBalance:input_type -> billing.v1.RebuildBalanceRequest
+	15, // 10: billing.v1.BillingService.Credit:input_type -> billing.v1.CreditRequest
+	17, // 11: billing.v1.BillingService.Refund:input_type -> billing.v1.RefundRequest
+	20, // 12: billing.v1.BillingService.ActivateSubscription:input_type -> billing.v1.ActivateSubscriptionRequest
+	22, // 13: billing.v1.BillingService.CancelSubscription:input_type -> billing.v1.CancelSubscriptionRequest
+	2,  // 14: billing.v1.BillingService.Reserve:output_type -> billing.v1.ReserveResponse
+	4,  // 15: billing.v1.BillingService.ReportUsage:output_type -> billing.v1.ReportUsageResponse
+	6,  // 16: billing.v1.BillingService.Settle:output_type -> billing.v1.SettleResponse
+	8,  // 17: billing.v1.BillingService.Reverse:output_type -> billing.v1.ReverseResponse
+	10, // 18: billing.v1.BillingService.GetBalance:output_type -> billing.v1.GetBalanceResponse
+	12, // 19: billing.v1.BillingService.ValidateAPIKey:output_type -> billing.v1.ValidateAPIKeyResponse
+	14, // 20: billing.v1.BillingService.RebuildBalance:output_type -> billing.v1.RebuildBalanceResponse
+	16, // 21: billing.v1.BillingService.Credit:output_type -> billing.v1.CreditReply
+	18, // 22: billing.v1.BillingService.Refund:output_type -> billing.v1.RefundReply
+	21, // 23: billing.v1.BillingService.ActivateSubscription:output_type -> billing.v1.ActivateSubscriptionReply
+	23, // 24: billing.v1.BillingService.CancelSubscription:output_type -> billing.v1.CancelSubscriptionReply
+	14, // [14:25] is the sub-list for method output_type
+	3,  // [3:14] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_billing_v1_billing_proto_init() }
@@ -1253,7 +1599,7 @@ func file_billing_v1_billing_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_billing_v1_billing_proto_rawDesc), len(file_billing_v1_billing_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
