@@ -10,15 +10,16 @@ REPO = ROOT.parent.parent  # R2.6-T2: 仓库根（顶层 eval/ 所在）；R2.7 
 SUMMARIZE = ROOT / 'summarize-offline-intent-audit.py'
 
 # Working-tree bytes compared with locked hashes by the CI verify commands.
-# 路径为仓库根相对路径（R2.6-T2 后 eval/ 位于仓库顶层）。
+# 路径为仓库根相对路径（R2.6-T2 后 eval/ 位于仓库顶层；R2.7 服务拆分后校验器驻
+# tools/verify/、web 生成器驻 services/gateway/web/scripts/，-text 规则已同步重锚）。
 LOCKED_PATHS = (
     'eval/ai-gateway/paired-pilots/2026-10-17-jev-acceptance-v1/attempt-01/run.jsonl',
     'eval/ai-gateway/paired-pilots/2026-10-17-four-task-retest-v1/attempt-01/run.jsonl',
     'eval/ai-gateway/intent-suite/manifest.json',
     'eval/ai-gateway/intent-suite/balance.json',
-    'services/ai-gateway/web/scripts/gen-intent-suite.mjs',
-    'services/ai-gateway/scripts/customer-service-contract.py',
-    'services/ai-gateway/scripts/summarize-offline-intent-audit.py',
+    'services/gateway/web/scripts/gen-intent-suite.mjs',
+    'tools/verify/customer-service-contract.py',
+    'tools/verify/summarize-offline-intent-audit.py',
 )
 
 
