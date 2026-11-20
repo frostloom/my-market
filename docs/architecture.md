@@ -293,7 +293,7 @@ flowchart LR
 
 K8s 验收七项（不再加戏）：多副本+反亲和 · HPA · 滚动更新 · 探针 · Prometheus/Grafana/Jaeger · Ingress · 节点 drain 自愈。
 
-> R6 前端部署：`web/` 先 `npm run build`，产物由 mall-bff **go:embed 托管**（构建顺序同 ai-gateway web 模式：前端构建先于 go build）；生产同源无 CORS，开发期 Vite devServer 将 `/api` 代理至 :18090。
+> R6 前端部署：`web/` 先 `npm run build`，产物由 mall-bff **go:embed 托管**（构建顺序同 gateway `web/` 模式：前端构建先于 go build）；生产同源无 CORS，开发期 Vite devServer 将 `/api` 代理至 :18090。
 
 ---
 

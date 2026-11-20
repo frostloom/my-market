@@ -55,18 +55,29 @@ gateway :18080 ──AI 网关数据面（OpenAI 兼容 /v1，SSE 流式，鉴�
 docs/
   PRD.md                    产品需求 v0.5（决策清单 D1-D18 / 待决策 P 系列）
   architecture.md           架构与服务流转图（八图）
-  spec/                     SDD 规格：api-contract（27 错误码全表）/ db-schema / sequences / acceptance / adr×10
+  spec/                     SDD 规格：api-contract（27 错误码全表）/ db-schema / sequences / acceptance / adr×11
   plans/                    实现计划 + SDD 执行台账归档（每个里程碑的完整审查记录）
-services/ai-gateway/         既有 AI 网关（整仓迁入，模块路径不变；仅 5 个加法 RPC，内核零改动）
-services/{mall-bff,mall-goods,mall-order}   商城三服务（根模块）
-services/mall-gen                     mall gRPC 生成物（make proto 输出，勿手改）
-services/seckill                      秒杀服务（R4 占位）
-eval/ai-gateway/             统一评测资产（R2.6-T2 自 services/ai-gateway/eval 提为顶层；数据集入库、运行产物忽略；规约见 eval/README.md）
-pkg/{mallerr,mallpage,importguard}          错误码/游标分页/跨模块 import 守卫
-proto/mall/v1/              商城侧 gRPC 契约（make proto 生成）
-deploy/compose/             docker compose（profiles: infra / ai / mall）
-scripts/                    建库/种子/冒烟脚本
+  ai-gateway/               旧仓冻结历史文档（置顶声明死链债与布局差异，不随活码更新）
+services/                    全量服务树（单模块，R2.7 拆分；边界=编译器 internal + pkg/importguard 白名单门禁，ADR-011）
+  mall-bff · mall-goods · mall-order   商城三服务
+  mall-gen                  mall gRPC 生成物（make proto 输出，勿手改）
+  seckill                   秒杀服务（R4 占位）
+  gateway                   AI 网关数据面（/v1 推理、Web 双面板、web/ 前端源）
+  billing                   计费权威：cmd/{billing,reconciler,event-consumer} 三域工人 + store 数据层 + admin 观测 + scripts/schema.sql
+  router                    上游加权路由 + 熔断 + AutoBan
+  agent                     AI 智能客服（执行层不信任 LLM；tools/eval、tools/knowledge-manifest）
+  mock-provider             假上游（故障注入）
+pkg/                         共享库：商城侧 mallerr/mallpage；AI 侧 config/logger/redisx/tokens/quota/kafka/trace/xid/jev/observability/supportconfig/upstream/gatewayclient/controlplane
+  importguard               跨服务 import 边界白名单门禁（编译器管 internal，门禁管公开面）
+  proto/billing/v1          billing gRPC 契约（mall 对 AI 域唯一合法 import 面）
+tools/                       评测/基准工具 10 个 + internal/{taskbench,localpaired} + verify/（冻结证据校验器）+ m1/m4 + legacy-ops/
+eval/ai-gateway/             统一评测资产（R2.6-T2 提为顶层；数据集入库、运行产物忽略；规约见 eval/README.md）
+proto/mall/v1/               商城侧 gRPC 契约（make proto 生成）
+deploy/compose/              docker compose（profiles: infra / ai / mall）
+scripts/                     建库/种子/冒烟脚本
 ```
+
+服务树内另有服务专属工具位（编译器允许伸手本树 internal）：`services/agent/tools/`、`services/gateway/tools/`、`services/billing/tools/`（运维 loadtest/m7/seed 等）。
 
 ## 跑起来
 
@@ -76,11 +87,11 @@ docker compose --profile infra --profile ai --profile mall up -d   # 全家 11 �
 bash scripts/smoke-r2.5.sh                  # 端到端验证（可重复跑）
 ```
 
-开发：`CGO_ENABLED=0 go build ./... && go test ./services/... ./pkg/...`（本机 SDK 兼容性要求 CGO 关闭）。
+开发：`CGO_ENABLED=0 go build ./...`（本机 SDK 兼容性要求 CGO 关闭）。测试分域门禁（同 CI）：mall 域绿测 `go test ./services/mall-goods/... ./services/mall-order/... ./services/mall-bff/... ./pkg/mallerr/... ./pkg/mallpage/... ./pkg/importguard/...`；AI 域走失败名基线棘轮 `bash tools/verify/ci-gotest-baseline.sh tools/verify/ci-baseline-ai-gateway.txt`。
 
 ## 开发过程
 
-规格驱动（SDD）：PRD → 规格五件套 → 任务计划 → 子代理逐任务实现+独立审查+修复循环 → 整分支终审（opus）→ 合并。每个里程碑的完整裁定与审查记录归档在 `docs/plans/sdd-archive-*/`。关键架构决策见 [ADR 目录](docs/spec/adr/)——服务边界、订单分域、outbox 履约、billing 加法原则、支付抽象三档、秒杀三道防线等。
+规格驱动（SDD）：PRD → 规格五件套 → 任务计划 → 子代理逐任务实现+独立审查+修复循环 → 整分支终审（opus）→ 合并。每个里程碑的完整裁定与审查记录归档在 `docs/plans/sdd-archive-*/`。关键架构决策见 [ADR 目录](docs/spec/adr/)——服务拆分与单模块边界（ADR-011）、服务边界、订单分域、outbox 履约、billing 加法原则、支付抽象三档、秒杀三道防线等。
 
 ## 路线图
 
@@ -91,4 +102,4 @@ bash scripts/smoke-r2.5.sh                  # 端到端验证（可重复跑）
 
 ## 致谢
 
-商城域构建于既有的 [ai-gateway](services/ai-gateway/)（OpenAI 兼容多租户模型网关 + 计费平台）之上——计费内核（Redis 原子预扣、幂等结算、对账收敛）一行未动，只做加法。
+商城域构建于既有的 [ai-gateway](docs/ai-gateway/README.md)（OpenAI 兼容多租户模型网关 + 计费平台）之上——计费内核（Redis 原子预扣、幂等结算、对账收敛）一行未动，只做加法；R2.7 起以其十个服务树平铺 `services/` 与商城同构（ADR-011）。

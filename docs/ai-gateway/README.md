@@ -1,8 +1,10 @@
 # AI 模型网关 / 计费平台（Go 微服务）
 
-> **现状说明（2026-11-11）**：默认计费已改为 Redis 实时余额与 MySQL 定时批量落账；下文带 M 编号的历史验收数字仅代表当时版本。最新学习入口及评测口径见 [当前架构与面试指南](docs/interview/current-2026-11-11.md)。
+> **R2.7 冻结声明（2026-11-20，置顶必读）**：本目录是 ai-gateway 旧仓 `docs/` 的**冻结历史文档**（随 R0 整仓迁入、R2.6 归位至此，R2.7 起不再随活码更新）。文中代码路径（`internal/...`、`cmd/...`、`services/ai-gateway/...` 等）描述的是**当时的仓库布局**——R2.7 服务拆分后活码已平铺 `services/{gateway,billing,router,agent,mock-provider,...}`、评测工具在 `tools/`、校验器在 `tools/verify/`，本文一律**不回改**。死链债如实入档：顶层面板共 121 处死链（107 个不同目标；全树含子目录 204 处，T2 审查口径 117），成因 = 迁移重锚 + 历史债（旧仓时代已断的链接），不做全量回改；仅本 README 自身 23 处 `docs/` 前缀的相对链接已修（指向本目录内 `interview/` 等）。活码与现行架构入口：仓库根 [README.md](../../README.md) 与 [docs/architecture.md](../architecture.md)、决策记录 [docs/spec/adr/](../spec/adr/)。
 
-> 历史迁移参考：[产物用途及迁移交接（2026-10-20）](docs/MIGRATION-HANDOFF-2026-10-20.md)。包含当时的私有配置位置、Docker 数据边界与启动步骤，现状以当前代码和本指南为准。
+> **现状说明（2026-11-11）**：默认计费已改为 Redis 实时余额与 MySQL 定时批量落账；下文带 M 编号的历史验收数字仅代表当时版本。最新学习入口及评测口径见 [当前架构与面试指南](interview/current-2026-11-11.md)。
+
+> 历史迁移参考：[产物用途及迁移交接（2026-10-20）](MIGRATION-HANDOFF-2026-10-20.md)。包含当时的私有配置位置、Docker 数据边界与启动步骤，现状以当前代码和本指南为准。
 
 > **一句话**：一个 OpenAI 兼容的多租户模型网关，核心是**计费正确性**——并发额度控制、批量落账与故障恢复，以及坏上游熔断切换。参考 new-api / one-api 的业务场景。
 
@@ -11,9 +13,9 @@
 - **存储**：Redis（批量模式下实时余额权威 / 会话态 / 限流 / 缓存）· MySQL（账单及余额定期落账）· Kafka（计费事件流，M10）
 - **Web 页面**：`/` 管理员账号登录 · `/portal` 普通用户直接注册、账号密码登录（无需邀请码，含 AI 客服聊天）——分别使用 HttpOnly 会话，独立前端工程构建，go:embed 托管，无 CDN
 - **AI 客服安全性**：执行层不信任 LLM（tenant 只来自验证过的 key、写操作必须用户确认、参数服务端重校验）
-  + **JEV「System One」判断引擎**（按配置执行选择性判断及快速路径，复杂请求回退主模型，见[当前指南](docs/interview/current-2026-11-11.md)）
-- **评测**：35 条离线功能用例；1220 条数据集已有本地双臂完整采集，另一次 Langfuse 相关运行状态记录 1218 完成、2 失败，本地 grade 文件均为空对象，评分结果尚待核验，详见[当前评测口径](docs/interview/current-2026-11-11.md#评测口径)。
-- **面试文档**：[当前指南](docs/interview/current-2026-11-11.md)、[面试追问与练习](docs/interview/interview-practice-2026-11-11.md)及历史 [docs/interview/](docs/interview/)（Go 入门 + 分布式概念 + 每里程碑 Q&A + 项目故事 + 压测教学 + M7 AI 客服 + M10 意图评测与 JEV）
+  + **JEV「System One」判断引擎**（按配置执行选择性判断及快速路径，复杂请求回退主模型，见[当前指南](interview/current-2026-11-11.md)）
+- **评测**：35 条离线功能用例；1220 条数据集已有本地双臂完整采集，另一次 Langfuse 相关运行状态记录 1218 完成、2 失败，本地 grade 文件均为空对象，评分结果尚待核验，详见[当前评测口径](interview/current-2026-11-11.md#评测口径)。
+- **面试文档**：[当前指南](interview/current-2026-11-11.md)、[面试追问与练习](interview/interview-practice-2026-11-11.md)及历史 [docs/interview/](interview/)（Go 入门 + 分布式概念 + 每里程碑 Q&A + 项目故事 + 压测教学 + M7 AI 客服 + M10 意图评测与 JEV）
 
 ---
 
@@ -57,7 +59,7 @@ renewer（续费器，billing 内）: 扫到期 auto_renew 订阅 → 延下一�
 **两个数据面**：gateway↔billing 走 gRPC（控制面，计费），gateway↔router→mock-provider 走
 HTTP/SSE（数据面，流式）。读到 usage 帧时按上游实际产出结算；正文已转发但没有 usage 时，按已转发文本估算后结算。
 **AI 客服是网关的「一个用户」**：agent 用租户 API key 鉴权、按租户隔离、写操作走同一套计费核心——
-它自身的安全不靠 LLM 判断，靠执行层强制（见 [07-m7.md](docs/interview/07-m7.md)）。
+它自身的安全不靠 LLM 判断，靠执行层强制（见 [07-m7.md](interview/07-m7.md)）。
 
 ---
 
@@ -69,7 +71,7 @@ HTTP/SSE（数据面，流式）。读到 usage 帧时按上游实际产出结�
 | 退款非幂等（源码注释明说不能重试） | 重试双倍退款 | `uk_request_phase (request_id, phase)` 唯一索引 + Redis `SETNX` 守卫，重复结算/冲正 no-op |
 | 无对账：预扣后结算前崩溃 | 额度永久卡住 | [reconciler](internal/billing/reconciler/reconciler.go)：扫描滞留 pending，无 marker 全退 / 有 marker 补结算 |
 
-> 详述见 [00-project-story.md](docs/interview/00-project-story.md)。
+> 详述见 [00-project-story.md](interview/00-project-story.md)。
 
 ---
 
@@ -79,7 +81,7 @@ HTTP/SSE（数据面，流式）。读到 usage 帧时按上游实际产出结�
 
 `BILLING_LEDGER_BATCH_SECONDS` 默认 5，允许 0–60；设为 0 关闭批量模式。批量模式下，请求先通过 Redis 原子预扣和结算，Redis 保存实时余额；账单和余额变动先进入进程内批次，后台按配置间隔写入 MySQL。写入间隔是调度周期，不保证故障时最多延迟 5 秒。Kafka 配置后异步承载请求明细，**不负责修改余额**；`BILLING_LEDGER_VIA_KAFKA=1` 会被启动入口拒绝。
 
-MySQL 可能暂时落后，不能在有在途变动时直接用旧 SQL 余额覆盖 Redis；账务故障要核对 Redis、批次、MySQL 与事件记录。批次和待发送事件包含内存状态，不能笼统声称任意崩溃都不丢账或仅靠 MySQL 就能恢复全部已确认变动。非批量模式仍有不同的同步写账与恢复路径。详见 [当前架构与面试指南](docs/interview/current-2026-11-11.md)。
+MySQL 可能暂时落后，不能在有在途变动时直接用旧 SQL 余额覆盖 Redis；账务故障要核对 Redis、批次、MySQL 与事件记录。批次和待发送事件包含内存状态，不能笼统声称任意崩溃都不丢账或仅靠 MySQL 就能恢复全部已确认变动。非批量模式仍有不同的同步写账与恢复路径。详见 [当前架构与面试指南](interview/current-2026-11-11.md)。
 
 历史 M4 对账基于当时 MySQL 账单与 pending/usage marker：扫描滞留记录，按状态尝试补结算或冲正。它不应被描述为批量模式下无条件从旧 MySQL 重建 Redis 的方案。
 
@@ -202,7 +204,7 @@ cd web && npm run verify   # = vue-tsc --noEmit && vite build && node scripts/sm
 
 ### JEV 判断与客服快速路径
 
-JEV 可按客服配置启用，用于选择性判断。支持的明确查询可进入只读快速路径；高置信度的高风险请求和无关内容按规则处理，复杂或判断失败时回退主模型。具体处理受运行模式、阈值和上下文影响，见 [fast_path.go](internal/agent/fast_path.go) 与 [当前架构指南](docs/interview/current-2026-11-11.md)。用户身份、工具参数与写操作确认仍由执行层控制；不能把判断模型当作唯一安全边界。
+JEV 可按客服配置启用，用于选择性判断。支持的明确查询可进入只读快速路径；高置信度的高风险请求和无关内容按规则处理，复杂或判断失败时回退主模型。具体处理受运行模式、阈值和上下文影响，见 [fast_path.go](internal/agent/fast_path.go) 与 [当前架构指南](interview/current-2026-11-11.md)。用户身份、工具参数与写操作确认仍由执行层控制；不能把判断模型当作唯一安全边界。
 
 ### Kafka 计费事件流
 
@@ -262,7 +264,7 @@ bash scripts/loadtest/run.sh 200 60s     # 并发、时长可调
 ```
 
 > 注：Git Bash 的 `kill` 杀不掉 Windows exe，一律 `taskkill //PID <pid> //F`。
-> 压测教学（P50/P95/P99 怎么读、三条压测路径、六个坑）见 [06-loadtest.md](docs/interview/06-loadtest.md)。
+> 压测教学（P50/P95/P99 怎么读、三条压测路径、六个坑）见 [06-loadtest.md](interview/06-loadtest.md)。
 
 ---
 
@@ -392,15 +394,15 @@ docs/api-reference.md                 前端对接 API 契约（portal/admin/age
 
 ## 面试文档索引
 
-- [00-project-story.md](docs/interview/00-project-story.md) —— 30 秒项目故事 + new-api 三缺陷对比
-- [go-primer.md](docs/interview/go-primer.md) —— 本项目用到的 Go 语法/并发原语速览
-- [distributed-concepts.md](docs/interview/distributed-concepts.md) —— 分布式概念白话版，每个都标本项目落点
-- [01-m1.md](docs/interview/01-m1.md) ~ [05-m5.md](docs/interview/05-m5.md) —— 每里程碑：概念层→代码导读→面试 Q&A→真实验证结果→口述抽查
-- [06-loadtest.md](docs/interview/06-loadtest.md) —— 压测教学：三条压测路径、P50/P95/P99 怎么读、六个坑、50→300 逐步加压实测
-- [07-m7.md](docs/interview/07-m7.md) —— M7/M9 AI 智能客服 + GPT Plus 式订阅：agentic 自服务、执行层不信任 LLM、话费式退款口径、二次确认状态机、审计可追责、订阅=每窗口 token 额度
-- [08-eval.md](docs/interview/08-eval.md) —— AI 客服评测集：35 用例 × 6 维度、离/在线双模式、纵深断言、迭代闭环
-- [09-jev.md](docs/interview/09-jev.md) —— P3 JEV 判断引擎：System One 给 System Two 上保险、意图预判 + 写操作守门、置信度阈值与审计
-- [10-intent-eval-and-jev.md](docs/interview/10-intent-eval-and-jev.md) —— M10 意图路由评测集（1220 条怎么建、为什么 CLINC150/Banking77 不能用）+ JEV 分层接入 + JEV 前后指标对比 + 并发超时踩坑
+- [00-project-story.md](interview/00-project-story.md) —— 30 秒项目故事 + new-api 三缺陷对比
+- [go-primer.md](interview/go-primer.md) —— 本项目用到的 Go 语法/并发原语速览
+- [distributed-concepts.md](interview/distributed-concepts.md) —— 分布式概念白话版，每个都标本项目落点
+- [01-m1.md](interview/01-m1.md) ~ [05-m5.md](interview/05-m5.md) —— 每里程碑：概念层→代码导读→面试 Q&A→真实验证结果→口述抽查
+- [06-loadtest.md](interview/06-loadtest.md) —— 压测教学：三条压测路径、P50/P95/P99 怎么读、六个坑、50→300 逐步加压实测
+- [07-m7.md](interview/07-m7.md) —— M7/M9 AI 智能客服 + GPT Plus 式订阅：agentic 自服务、执行层不信任 LLM、话费式退款口径、二次确认状态机、审计可追责、订阅=每窗口 token 额度
+- [08-eval.md](interview/08-eval.md) —— AI 客服评测集：35 用例 × 6 维度、离/在线双模式、纵深断言、迭代闭环
+- [09-jev.md](interview/09-jev.md) —— P3 JEV 判断引擎：System One 给 System Two 上保险、意图预判 + 写操作守门、置信度阈值与审计
+- [10-intent-eval-and-jev.md](interview/10-intent-eval-and-jev.md) —— M10 意图路由评测集（1220 条怎么建、为什么 CLINC150/Banking77 不能用）+ JEV 分层接入 + JEV 前后指标对比 + 并发超时踩坑
 
 ## 里程碑
 
@@ -426,7 +428,7 @@ docs/api-reference.md                 前端对接 API 契约（portal/admin/age
   合并写。
 - 熔断为单实例内存态，多实例需共享判定（可落到 Redis / 依赖 AutoBan 的持久层兜底）。
 - mock-provider 为本地故障注入假 upstream，不接真实 LLM。
-- demo 租户余额会被压测消耗（60s 烧 ~7-10M），压测前按 [06-loadtest.md](docs/interview/06-loadtest.md) §5.4 充值。
+- demo 租户余额会被压测消耗（60s 烧 ~7-10M），压测前按 [06-loadtest.md](interview/06-loadtest.md) §5.4 充值。
 - **AI 客服依赖真实 DeepSeek**：`AGENT_LLM_API_KEY` 未填时 `/portal/chat` 明确报错（无 mock 模式，
   离线验证靠假 LLM 单测 + m7 场景脚本）。单测对 LLM 的调用面做了接口化，脚本化 tool_call 注入。
 - **余额是单池**：退款 `min(单,余额)` 可能吃到别的充值额度，不做按订单资金锁定。

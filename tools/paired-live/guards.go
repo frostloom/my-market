@@ -128,7 +128,9 @@ func verifyExecutionRevisionWithArchive(root, requested, built string, modified 
 			return fmt.Errorf("source state unavailable")
 		}
 		for _, path := range strings.Split(string(raw), "\x00") {
-			// R2.6 起 ai-gateway 模块位于 services/ai-gateway/：模块级 go.mod/go.sum 也纳入冻结审查。
+			// R2.6 起 ai-gateway 模块文件纳入冻结审查；R2.7 起单模块（go.work 与
+			// services/ai-gateway/{go.mod,go.sum} 已删），相关条目仅为历史窗口内
+			// 差异兜底保留——根模块 go.mod/go.sum 由前两个精确匹配覆盖。
 			if path != "" && (archiveBuild || strings.HasSuffix(path, ".go") || path == "go.mod" || path == "go.sum" || path == "go.work" || path == "go.work.sum" || path == "services/ai-gateway/go.mod" || path == "services/ai-gateway/go.sum" || strings.HasPrefix(path, "eval/ai-gateway/task-definitions/") || strings.HasPrefix(path, "eval/ai-gateway/runtime-profiles/")) {
 				return fmt.Errorf("runtime source or frozen inputs differ from reviewed revision")
 			}
