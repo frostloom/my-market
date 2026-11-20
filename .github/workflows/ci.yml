@@ -104,6 +104,12 @@ jobs:
       # 本地已知失败集（load/环境敏感）见 scripts/ci-baseline-ai-gateway.txt，只减不增。
       - name: test
         run: bash scripts/ci-gotest-baseline.sh scripts/ci-baseline-ai-gateway.txt
+      # 脚本双打测试套件为 Unix 向（fcntl/O_NOFOLLOW/POSIX 路径），在 Linux 跑（本地 macOS 337 全绿的等价环境）
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Script doubles unittest
+        run: python -m unittest discover -s scripts/tests
 
   # 冻结证据跨平台字节保真（Windows 换行场景）+ 离线契约（与旧仓一致）
   offline-evaluation:
@@ -125,8 +131,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Offline contracts and local script doubles only
-        run: python -m unittest discover -s scripts/tests
       - name: Preserve historical evidence
         run: |
           python scripts/customer-service-contract.py verify
