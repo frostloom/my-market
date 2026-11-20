@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const dist = resolve(here, '../..', 'internal/gateway/web/dist')
+const dist = resolve(here, '../..', 'internal/web/dist')
 
 function bootHtml(html) {
   const dom = new JSDOM(html, {
