@@ -35,6 +35,7 @@ def cleanup_temp(folder):
 
 
 @unittest.skipUnless(PS and Path(GO).exists(), 'requires local PowerShell and Go')
+@unittest.skipIf(os.name == 'posix', 'pwsh Start-Process semantics differ on Linux; launcher validated on macOS/Windows hosts')
 class LauncherTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
