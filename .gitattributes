@@ -36,3 +36,6 @@ tools/verify/** -text
 services/gateway/web/scripts/*.mjs -text
 # R2.7 承接 services/ai-gateway/.gitattributes（nested 规则随服务树拆分上移）
 tools/verify/langfuse-workbench.py whitespace=cr-at-eol
+
+# R2.7 审计预防性加固：冻结证据整树字节保护（新增冻结目录无需逐个补规则；langfuse-workbench 的 cr-at-eol 由嵌套文件叠加）
+eval/ai-gateway/** -text
