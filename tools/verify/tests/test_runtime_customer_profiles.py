@@ -4,11 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def tool():
-    spec = importlib.util.spec_from_file_location('runtime_profiles', ROOT / 'scripts/prepare-runtime-customer-profiles.py')
+    spec = importlib.util.spec_from_file_location('runtime_profiles', ROOT / 'prepare-runtime-customer-profiles.py')
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m

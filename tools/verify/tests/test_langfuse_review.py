@@ -7,11 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load():
-    spec = importlib.util.spec_from_file_location('langfuse_review_test', ROOT / 'scripts/langfuse-eval.py')
+    spec = importlib.util.spec_from_file_location('langfuse_review_test', ROOT / 'langfuse-eval.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

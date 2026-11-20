@@ -505,7 +505,7 @@ class ContentProjectionTests(unittest.TestCase):
         self.temporary=tempfile.TemporaryDirectory();self.addCleanup(self.temporary.cleanup)
         self.root=Path(self.temporary.name);self.source=self.root/'source';self.source.mkdir()
         self.f=fixture();self.f['manifest']['source_root']=str(self.source)
-        content=(SCRIPT.parents[1]/'internal/observability/content.go').read_bytes()
+        content=(SCRIPT.parents[2]/'pkg/observability/content.go').read_bytes()
         sources={'internal/observability/content.go':content,
             'internal/taskbench/conversation_runner.go':b'package taskbench\n',
             'go.mod':b'module github.com/frostloom/ai-gateway\n'}
@@ -1178,7 +1178,7 @@ def v4_fixture(base=None):
     m['schema'] = 'full-window-actual-ready.v4'; scope['schema'] = 'full-window-scope.v4'
     scope['baseline_evidence_sha256'] = '12a9d584ea9508a9fc7701532ad9214b0c743a8e13d17829432fac0d6b48a20c'
     scope['budget_approval_sha256'] = 'd5062e6f39f9ae7c9a8461121f9ba907c798100d7a5428af72da459595d2d554'
-    declaration = json.loads((SCRIPT.parents[3]/'eval/ai-gateway/paired-pilots/2026-10-29-cache-price/declaration.json').read_bytes())
+    declaration = json.loads((SCRIPT.parents[2]/'eval/ai-gateway/paired-pilots/2026-10-29-cache-price/declaration.json').read_bytes())
     scope['width'] = 28
     # The compact score fixture retains its four recorded arms and full schedule.
     for window, cap in zip(scope['windows'], declaration['caps']): window.update(cap)
@@ -1383,7 +1383,7 @@ class ClosedArchiveInventoryTests(unittest.TestCase):
 class ClosedP4WitnessTests(unittest.TestCase):
     setUpClass = classmethod(ContentProjectionTests.setUpClass.__func__)
     fake_go = ContentProjectionTests.fake_go
-    P4 = SCRIPT.parents[1]/'.tmp/paired-live-private/full1220-actual-v4-freeze-20261029'
+    P4 = SCRIPT.parents[2]/'.tmp/paired-live-private/full1220-actual-v4-freeze-20261029'
 
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory();self.addCleanup(self.temporary.cleanup)
@@ -1859,7 +1859,7 @@ class QualityV6RunnerTests(unittest.TestCase):
     setUpClass = classmethod(WindowScorePlanTests.setUpClass.__func__)
 
     def setUp(self):
-        self.work=SCRIPT.parents[1]/'.tmp/task6-quality6'
+        self.work=SCRIPT.parents[2]/'.tmp/task6-quality6'
         self.fixture=self.work/'proof-integration3'
         if not (self.fixture/'pins.json').is_file():self.skipTest('Owned source-built Task6 fixture unavailable')
         self.manifest_raw=(self.fixture/'manifest.json').read_bytes()
@@ -1869,7 +1869,7 @@ class QualityV6RunnerTests(unittest.TestCase):
         self.records={name:(self.work/'fixtures/true'/name).read_bytes() for name in self.pins['records']}
         evidence=json.loads((self.fixture/'evidence.json').read_bytes())
         self.evidence={'envelope_raw':evidence['envelope'].encode(),'sidecars':{name:value.encode() for name,value in evidence['sidecars'].items()}}
-        runtime=SCRIPT.parents[1]/'.tmp/paired-live-private/full1220-actual-v6-freeze-20261029/offline-runtime-preparation.json'
+        runtime=SCRIPT.parents[2]/'.tmp/paired-live-private/full1220-actual-v6-freeze-20261029/offline-runtime-preparation.json'
         self.runtime=json.loads(runtime.read_bytes())
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.output=Path(self.temp.name).resolve()/'proof'

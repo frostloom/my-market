@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 OUTPUT = EVAL / "experiments/2026-10-08-deepseek-flash"
 SOURCES = [
     "deepseek-flash-pilot-1791453708918",
@@ -128,7 +128,7 @@ def main():
     # Read only explicitly selected evidence types; never copy .env, binaries or
     # unrelated logs. Match actual configured API keys without printing them.
     secrets = []
-    for line in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
+    for line in (ROOT.parent / ".env").read_text(encoding="utf-8-sig").splitlines():
         name, sep, value = line.partition("=")
         if sep and name.strip().endswith("API_KEY"):
             value = value.strip().strip('\"\'')

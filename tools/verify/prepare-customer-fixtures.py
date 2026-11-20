@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'
 DEFAULT_OUT = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1'
 LIMITATIONS = [
@@ -46,6 +46,10 @@ def canonical_code_bytes(path=None):
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
 MIGRATION_LINES = [
+    ("                'scorer_canonical_sha256': r27_scorer_canonical_sha(ROOT / 'internal/taskbench/score.go'),",
+     "                'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),"),
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'\n",
      "SOURCE = ROOT / 'eval/contracts/2026-10-09-customer-service-v1/cases.json'\n"),
@@ -92,6 +96,20 @@ MIGRATION_LINES = [
      "    output = Path(output)\n"
      "    expected = expected_artifacts(source)\n"),
 ]
+# R2.7 服务拆分：score.go 的 import 行随单模块合并被合法重锚（编译必需）。哈希前按
+# 登记表把改写行还原为冻结原文——与 customer-service-contract.frozen_source_bytes
+# 对 web 生成器的 R2.6 先例同法。哨兵内定义，剥离后不进 canonical 字节。
+R27_SCORER_LINES = (
+    ('"github.com/frostloom/my-market/services/billing/store"',
+     '"github.com/frostloom/ai-gateway/internal/billing/store"'),
+)
+def r27_scorer_canonical_sha(path):
+    text = Path(path).read_bytes().decode('utf-8')
+    for migrated, frozen in R27_SCORER_LINES:
+        if migrated not in text:
+            raise ValueError('r27 scorer rewrite drifted: ' + migrated)
+        text = text.replace(migrated, frozen)
+    return sha(text.encode('utf-8').replace(b'\r\n', b'\n'))
 # --- r26-canonical: end ---
 def sha(data):
     return hashlib.sha256(data).hexdigest()
@@ -193,7 +211,7 @@ def expected_artifacts(source, provenance=None):
     manifest = {'schema': 'synthetic-fixture-preparation.v1', 'source_sha256': sha(raw),
                 'generator_canonical_sha256': sha(canonical_code_bytes().replace(b'\r\n', b'\n')),
                 'backend_canonical_sha256': code_sha(ROOT / 'internal/taskbench/live.go'),
-                'scorer_canonical_sha256': code_sha(ROOT / 'internal/taskbench/score.go'),
+                'scorer_canonical_sha256': r27_scorer_canonical_sha(ROOT / 'internal/taskbench/score.go'),
                 'files': {name: sha(data) for name, data in result.items()}}
     if provenance:
         # backend pin 记录冻结时的 runtime 代码出处；live.go 无归档快照可复现

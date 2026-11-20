@@ -5,11 +5,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def tool():
-    spec = importlib.util.spec_from_file_location('define_customer_tasks', ROOT / 'scripts/define-customer-tasks.py')
+    spec = importlib.util.spec_from_file_location('define_customer_tasks', ROOT / 'define-customer-tasks.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

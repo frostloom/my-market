@@ -9,7 +9,7 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 ARCHIVE = EVAL / 'paired-pilots/2026-10-15-langfuse-content-scores-v1'
 NAME = '客服开发任务-1220-v1'
 DASH = '客服本机替身验收-v1（非真实模型成绩）'
@@ -22,8 +22,8 @@ def module(name, file):
     return value
 
 
-legacy = module('workbench_scores', ROOT / 'scripts/langfuse-eval.py')
-base = module('workbench_definitions', ROOT / 'scripts/prepare-full-customer-pilot.py')
+legacy = module('workbench_scores', Path(__file__).resolve().parent / 'langfuse-eval.py')
+base = module('workbench_definitions', Path(__file__).resolve().parent / 'prepare-full-customer-pilot.py')
 encoded, sha = legacy.encoded, legacy.sha
 
 
@@ -64,7 +64,8 @@ def build_plan(root):
                 'execution_status': 'defined_not_run', 'definitions_sha256': definitions_sha,
                 'scenario_sha256': sha(encoded(scenario)), 'necessary_clarification_is_not_failure': True},
             'status': 'ACTIVE'})
-    raw_prompt = (root / 'internal/agent/prompt.go').read_text(encoding='utf-8-sig')
+    # R2.7 服务拆分：internal/agent 已迁 services/agent/agent（root 语义不变，仓库根由调用方给定）
+    raw_prompt = (Path(__file__).resolve().parents[2] / 'services' / 'agent' / 'agent' / 'prompt.go').read_text(encoding='utf-8-sig')
     match = re.search(r'const systemPrompt = `([^`]*)`', raw_prompt)
     if match is None:
         raise ValueError('Unsupported Go prompt representation')

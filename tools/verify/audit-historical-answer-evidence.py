@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'reviews/2026-10-09-intent-offline-audit'
 OUT = EVAL / 'reviews/2026-10-13-answer-evidence-v1'
 ARMS = ('nojev', 'hint', 'fast')
@@ -78,6 +78,8 @@ def frozen_source_label(path):
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
 MIGRATION_LINES = [
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("SOURCE = EVAL / 'reviews/2026-10-09-intent-offline-audit'\n",
      "SOURCE = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'\n"),

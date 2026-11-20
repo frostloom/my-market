@@ -7,9 +7,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
-SCRIPT = ROOT / 'scripts/repeated-v5-summary.py'
+SCRIPT = ROOT / 'repeated-v5-summary.py'
 
 
 def load():

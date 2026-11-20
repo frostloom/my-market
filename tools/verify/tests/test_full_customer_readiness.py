@@ -3,7 +3,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load(name, path):
@@ -15,8 +15,8 @@ def load(name, path):
 
 class FullCustomerReadinessTests(unittest.TestCase):
     def setUp(self):
-        self.tool = load('full_customer_audit', ROOT / 'scripts/audit-full-customer-readiness.py')
-        prepare = load('original_full_prepare', ROOT / 'scripts/prepare-full-customer-pilot.py')
+        self.tool = load('full_customer_audit', ROOT / 'audit-full-customer-readiness.py')
+        prepare = load('original_full_prepare', ROOT / 'prepare-full-customer-pilot.py')
         original = prepare.prepare(ROOT)
         self.probe = {
             'schema': 'full-customer-offline-preflight.v1', 'source_cases': 1220,

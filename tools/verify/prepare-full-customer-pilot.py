@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
 PROFILE = EVAL / 'runtime-profiles/2026-10-13-six-profiles-v1/profiles.json'
 OUT = EVAL / 'paired-pilots/2026-10-14-full-preflight-v1'
@@ -35,6 +35,8 @@ def canonical_code_bytes(path=None):
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
 MIGRATION_LINES = [
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'\n",
      "ARCHIVE = Path('eval/task-definitions/2026-10-12-full-dev-v1')\n"),
@@ -43,7 +45,22 @@ MIGRATION_LINES = [
     ("OUT = EVAL / 'paired-pilots/2026-10-14-full-preflight-v1'\n",
      "OUT = ROOT / 'eval/paired-pilots/2026-10-14-full-preflight-v1'\n"),
     ("sha(canonical_code_bytes())", "sha(Path(__file__).read_bytes())"),
+    ("'runtime_files_sha256': {p: sha(r27_live(root, p).read_bytes().replace(b'\\r\\n', b'\\n')) for p in RUNTIME_FILES}},",
+     "'runtime_files_sha256': {p: sha((root / p).read_bytes().replace(b'\\r\\n', b'\\n')) for p in RUNTIME_FILES}},"),
 ]
+# R2.7 服务拆分：本脚本驻 tools/verify/ 后 ROOT=tools（仓库根=ROOT.parent）；活码已
+# 各迁其域。下表把 runtime 文件标签解析到 R2.7 布局；哨兵内定义，剥离后不进
+# canonical 字节。internal/taskbench 恰仍位于 ROOT 下原生可解析。
+R27_LIVE = (
+    ('internal/agent/', ROOT.parent / 'services' / 'agent' / 'agent'),
+    ('internal/jev/', ROOT.parent / 'pkg' / 'jev'),
+    ('internal/taskbench/', ROOT / 'internal' / 'taskbench'),
+)
+def r27_live(root, name):
+    for prefix, home in R27_LIVE:
+        if name.startswith(prefix):
+            return home / name[len(prefix):]
+    return root / name
 # --- r26-canonical: end ---
 MANIFEST_SHA = 'afaf5fba49893d2c20e91dc8b0e84c998608b82194d6613a6b6549e289ac4181'
 PROFILE_SHA = '83a78d7492c75e0d153cbb9ca4a1a87aa2f15714ad1e855534a084f4848e257d'
@@ -138,7 +155,7 @@ def prepare(root):
                 'definition_sha256': sha((root / ARCHIVE / 'definitions.json').read_bytes()),
                 'runtime_hash_normalization': 'CRLF to LF; no other normalization',
                 'scenario_hash_encoding': 'UTF8 JSON sorted keys, indent 2, final LF',
-                'runtime_files_sha256': {p: sha((root / p).read_bytes().replace(b'\r\n', b'\n')) for p in RUNTIME_FILES}},
+                'runtime_files_sha256': {p: sha(r27_live(root, p).read_bytes().replace(b'\r\n', b'\n')) for p in RUNTIME_FILES}},
             'model_attempt_ceiling': sum(b['model_attempt_ceiling'] for b in batches),
             'jev_attempt_ceiling': sum(b['jev_attempt_ceiling'] for b in batches),
             'model_reservation_micro_cny': sum(b['model_reservation_micro_cny'] for b in batches),

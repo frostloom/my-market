@@ -75,7 +75,7 @@ class FixturePreparationTests(unittest.TestCase):
 
     def test_verify_recomputes_outputs_and_rejects_tampering_or_overwrite(self):
         tool = load()
-        with tempfile.TemporaryDirectory(dir=SCRIPT.parents[1]) as directory:
+        with tempfile.TemporaryDirectory(dir=SCRIPT.parents[0]) as directory:
             root = Path(directory)
             source = root / 'source.json'
             source.write_text(json.dumps([case('one')]), encoding='utf-8')

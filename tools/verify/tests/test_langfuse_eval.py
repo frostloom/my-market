@@ -7,12 +7,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 
 
 def load():
-    spec = importlib.util.spec_from_file_location('langfuse_eval', ROOT / 'scripts/langfuse-eval.py')
+    spec = importlib.util.spec_from_file_location('langfuse_eval', ROOT / 'langfuse-eval.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -168,7 +168,7 @@ class LangfuseEvaluationTests(unittest.TestCase):
 
     def test_startup_revalidates_frozen_profile_bytes(self):
         m = load()
-        spec = importlib.util.spec_from_file_location('observed_test', ROOT / 'scripts/prepare-observed-customer-pilot.py')
+        spec = importlib.util.spec_from_file_location('observed_test', ROOT / 'prepare-observed-customer-pilot.py')
         generator = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(generator)
         raw = m.encoded(generator.prepare(ROOT))

@@ -1,9 +1,9 @@
 import importlib.util, json, tempfile, unittest, copy, io
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 def load():
-    s = importlib.util.spec_from_file_location('workbench', ROOT / 'scripts/langfuse-workbench.py')
+    s = importlib.util.spec_from_file_location('workbench', ROOT / 'langfuse-workbench.py')
     m = importlib.util.module_from_spec(s)
     s.loader.exec_module(m)
     return m

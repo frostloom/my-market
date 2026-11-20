@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 GO = shutil.which('go') or 'E:/go1.25.12.windows-amd64/go/bin/go.exe'
 PS = shutil.which('pwsh') or shutil.which('powershell')
 
@@ -69,7 +69,7 @@ func main(){
         scripts = self.root / 'scripts'
         scripts.mkdir()
         self.script = scripts / 'run-task-experiment.ps1'
-        shutil.copyfile(ROOT / 'scripts/run-task-experiment.ps1', self.script)
+        shutil.copyfile(ROOT.parent / 'legacy-ops' / 'run-task-experiment.ps1', self.script)
         (scripts / 'load-env.ps1').write_text("$env:TEST_LOADED='yes'\n$env:TEST_EXISTING='changed'\n$env:AGENT_LLM_API_KEY='fake'\n$env:JEV_API_KEY='fake'\n", encoding='utf-8')
         self.cases = self.root / 'cases.json'
         self.cases.write_text(json.dumps([{'id': 'one'}]), encoding='utf-8')

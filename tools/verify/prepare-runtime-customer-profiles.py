@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'task-definitions/2026-10-12-full-dev-v1/profiles.json'
 OUT = EVAL / 'runtime-profiles/2026-10-13-six-profiles-v1'
 
@@ -37,6 +37,8 @@ def canonical_code_bytes(path=None):
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
 MIGRATION_LINES = [
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("SOURCE = EVAL / 'task-definitions/2026-10-12-full-dev-v1/profiles.json'\n",
      "SOURCE = ROOT / 'eval/task-definitions/2026-10-12-full-dev-v1/profiles.json'\n"),

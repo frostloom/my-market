@@ -5,8 +5,8 @@ import importlib.util
 from pathlib import Path
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location('full_local_matrix', ROOT / 'scripts/full-customer-local-matrix.py')
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('full_local_matrix', ROOT / 'full-customer-local-matrix.py')
 m = importlib.util.module_from_spec(spec)
 
 class FullLocalMatrixTests(unittest.TestCase):
@@ -51,7 +51,7 @@ class FullLocalMatrixTests(unittest.TestCase):
             window = {'id':'window-001','cases':[c]}
             binding = {k:self.plan[k] for k in ['selection_scope','selection_sha256','definition_sha256','manifest_sha256','profile_sha256']}
             revision = 'a'*40
-            original_spec = importlib.util.spec_from_file_location('frozen_source_test',ROOT/'scripts/prepare-full-customer-pilot.py')
+            original_spec = importlib.util.spec_from_file_location('frozen_source_test',ROOT/'prepare-full-customer-pilot.py')
             source = importlib.util.module_from_spec(original_spec);original_spec.loader.exec_module(source)
             selected = source.select_primary(source.load_definitions(ROOT))
             source_row,scenario=next((row,sc) for row,sc in selected if row['source_case_id']+'/'+sc['id']==c['key'])

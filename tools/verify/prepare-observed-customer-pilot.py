@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 OUT = EVAL / 'paired-pilots/2026-10-17-jev-proxy-preflight-v4'
 # --- r26-canonical: begin ---
 # R2.6 迁移垫片：本哨兵块之间的全部内容（含本函数与改写表）在 canonical 字节中
@@ -32,15 +32,36 @@ def canonical_code_bytes(path=None):
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
 MIGRATION_LINES = [
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("OUT = EVAL / 'paired-pilots/2026-10-17-jev-proxy-preflight-v4'\n",
      "OUT = ROOT / 'eval/paired-pilots/2026-10-17-jev-proxy-preflight-v4'\n"),
     ("base.sha((EVAL / 'paired-pilots/2026-10-14-full-preflight-v1/proposal.json').read_bytes())",
      "base.sha((root / 'eval/paired-pilots/2026-10-14-full-preflight-v1/proposal.json').read_bytes())"),
     ("base.sha(canonical_code_bytes())", "base.sha(Path(__file__).read_bytes())"),
+    ("spec = importlib.util.spec_from_file_location('full_pilot_base', VERIFY / 'prepare-full-customer-pilot.py')",
+     "spec = importlib.util.spec_from_file_location('full_pilot_base', ROOT / 'scripts/prepare-full-customer-pilot.py')"),
+    ("    hashes.update({name: base.sha(r27_live(root, name).read_bytes().replace(b'\\r\\n', b'\\n')) for name in EXTRA_FILES})",
+     "    hashes.update({name: base.sha((root / name).read_bytes().replace(b'\\r\\n', b'\\n')) for name in EXTRA_FILES})"),
 ]
+# R2.7 服务拆分：本脚本驻 tools/verify/ 后 ROOT=tools（仓库根=ROOT.parent）；活码已
+# 各迁其域。下表把冻结 manifest 里的历史路径标签解析到 R2.7 布局；哨兵内定义，
+# 剥离后不进 canonical 字节。internal/taskbench 恰仍位于 ROOT 下原生可解析。
+VERIFY = Path(__file__).resolve().parent
+R27_LIVE = (
+    ('internal/agent/', ROOT.parent / 'services' / 'agent' / 'agent'),
+    ('internal/observability/', ROOT.parent / 'pkg' / 'observability'),
+    ('internal/taskbench/', ROOT / 'internal' / 'taskbench'),
+    ('scripts/', VERIFY),
+)
+def r27_live(root, name):
+    for prefix, home in R27_LIVE:
+        if name.startswith(prefix):
+            return home / name[len(prefix):]
+    return root / name
 # --- r26-canonical: end ---
-spec = importlib.util.spec_from_file_location('full_pilot_base', ROOT / 'scripts/prepare-full-customer-pilot.py')
+spec = importlib.util.spec_from_file_location('full_pilot_base', VERIFY / 'prepare-full-customer-pilot.py')
 base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
 EXTRA_FILES = ('internal/agent/telemetry.go', 'internal/agent/observability.go',
@@ -56,7 +77,7 @@ def prepare(root):
     p['schema'] = 'full-pilot-observed-preparation.v2'
     p['source_bindings']['previous_proposal_sha256'] = base.sha((EVAL / 'paired-pilots/2026-10-14-full-preflight-v1/proposal.json').read_bytes())
     hashes = p['source_bindings']['runtime_files_sha256']
-    hashes.update({name: base.sha((root / name).read_bytes().replace(b'\r\n', b'\n')) for name in EXTRA_FILES})
+    hashes.update({name: base.sha(r27_live(root, name).read_bytes().replace(b'\r\n', b'\n')) for name in EXTRA_FILES})
     p['observability_requirements'] = {
         'environment': 'evaluation', 'capture_content': True, 'sample_rate': 1,
         'llm_judge_enabled': False, 'score_source': 'trusted offline paired reports',

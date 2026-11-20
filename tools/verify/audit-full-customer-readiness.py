@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 CLAIM_SHA = 'f09de5bb9ab4147f140f54db7a25c5f419b7a4e48137d63c1782ea7c38d768b3'
 PRICING = EVAL / 'paired-pilots/2026-10-27-receiver-repeated-entry/pricing.json'
 PILOT_KEYS = frozenset([
@@ -30,7 +30,7 @@ def sha(raw):
 
 def audit(root, probe, reservation):
     root = Path(root)
-    spec = importlib.util.spec_from_file_location('full_source', root / 'scripts/prepare-full-customer-pilot.py')
+    spec = importlib.util.spec_from_file_location('full_source', Path(__file__).resolve().parent / 'prepare-full-customer-pilot.py')
     prepare = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(prepare)
     definitions = prepare.load_definitions(root)

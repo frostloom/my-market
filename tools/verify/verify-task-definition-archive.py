@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+VERIFY = Path(__file__).resolve().parent
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 ARCHIVE = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
 SNAPSHOT = EVAL / 'code-snapshots/2026-10-12-full-dev-v1'
 # Pinned from the frozen manifest at c028aa85; never derive this from runtime input.
@@ -15,7 +16,7 @@ ARCHIVED_BINDINGS = ('internal/agent/tools.go', 'internal/billing/store/plan.go'
 
 
 def verify(archive=ARCHIVE, snapshot=SNAPSHOT):
-    spec = importlib.util.spec_from_file_location('frozen_task_generator', ROOT / 'scripts/define-customer-tasks.py')
+    spec = importlib.util.spec_from_file_location('frozen_task_generator', VERIFY / 'define-customer-tasks.py')
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
     archive, snapshot = Path(archive), Path(snapshot)

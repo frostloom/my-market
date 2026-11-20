@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 IDENTITY = EVAL / 'paired-pilots/2026-10-27-full1220-adapter/selection-identity.json'
 RUNTIME_SHA = {'prompt_sha256':'731344ccef1bfc40456b6797e9c7cb5c5c3d628799d3e5ee8ab05f3142c6f7fa',
                'tool_schema_sha256':'3962937d7fd08af4794758a56070b7bbadfb5c3e188cf1fa539355780b9e0e17'}
@@ -54,7 +54,7 @@ def case_digest(case):
 
 def prepare(root):
     root = Path(root)
-    spec = importlib.util.spec_from_file_location('original_full_source', root/'scripts/prepare-full-customer-pilot.py')
+    spec = importlib.util.spec_from_file_location('original_full_source', Path(__file__).resolve().parent/'prepare-full-customer-pilot.py')
     source = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(source)
     selected = source.select_primary(source.load_definitions(root))

@@ -2,11 +2,11 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load():
-    spec = importlib.util.spec_from_file_location('observed_pilot', ROOT / 'scripts/prepare-observed-customer-pilot.py')
+    spec = importlib.util.spec_from_file_location('observed_pilot', ROOT / 'prepare-observed-customer-pilot.py')
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m

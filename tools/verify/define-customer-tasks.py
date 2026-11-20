@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'
 READINESS = EVAL / 'task-suites/2026-10-11-read-fixtures-dev-v1/readiness.json'
 DEFAULT_OUT = EVAL / 'task-definitions/2026-10-12-full-dev-v1'
@@ -44,6 +44,8 @@ def canonical_code_bytes(path=None):
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
 MIGRATION_LINES = [
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("SOURCE = EVAL / 'contracts/2026-10-09-customer-service-v1/cases.json'\n",
      "SOURCE = ROOT / 'eval/contracts/2026-10-09-customer-service-v1/cases.json'\n"),
@@ -53,17 +55,59 @@ MIGRATION_LINES = [
      "DEFAULT_OUT = ROOT / 'eval/task-definitions/2026-10-12-full-dev-v1'\n"),
     ("        'code_canonical_sha256': {p: code_pin(p) for p in bindings},",
      "        'code_canonical_sha256': {p: sha((ROOT / p).read_bytes().replace(b'\\r\\n', b'\\n')) for p in bindings},"),
+    ("spec = importlib.util.spec_from_file_location('read_fixture_validator', VERIFY / 'prepare-customer-fixtures.py')",
+     "spec = importlib.util.spec_from_file_location('read_fixture_validator', ROOT / 'scripts/prepare-customer-fixtures.py')"),
 ]
+
+# R2.7 服务拆分：本脚本驻 tools/verify/ 后 ROOT=tools（仓库根=ROOT.parent）；
+# code_pin 的绑定标签（冻结 manifest 记录的前布局路径）按下表解析到 R2.7 布局。
+# 哨兵内定义，剥离后不进 canonical 字节。
+VERIFY = Path(__file__).resolve().parent
+R27_PIN = (
+    ('scripts/', VERIFY),
+    ('internal/agent/', ROOT.parent / 'services' / 'agent' / 'agent'),
+    ('internal/billing/store/', ROOT.parent / 'services' / 'billing' / 'store'),
+)
+def r27_pin(path):
+    for prefix, home in R27_PIN:
+        if path.startswith(prefix):
+            return home / path[len(prefix):]
+    return ROOT / path
+
+# R2.7 服务拆分：被 code_pin 硬校验的活码文件，其 import 行随单模块合并被合法重锚
+# （编译必需）。哈希前按登记表把改写行还原为冻结原文（哨兵内定义，不进 canonical 字节）。
+R27_GO_LINES = {
+    'internal/agent/tools.go': (
+        ('"github.com/frostloom/my-market/services/billing/store"',
+         '"github.com/frostloom/ai-gateway/internal/billing/store"'),
+        ('"github.com/frostloom/my-market/services/agent/internal/knowledge"',
+         '"github.com/frostloom/ai-gateway/internal/knowledge"'),
+        ('"github.com/frostloom/my-market/pkg/observability"',
+         '"github.com/frostloom/ai-gateway/internal/observability"'),
+        ('"github.com/frostloom/my-market/pkg/controlplane"',
+         '"github.com/frostloom/ai-gateway/internal/pkg/controlplane"'),
+    ),
+    'internal/billing/store/plan.go': (
+        ('"github.com/frostloom/my-market/pkg/quota"',
+         '"github.com/frostloom/ai-gateway/internal/pkg/quota"'),
+    ),
+}
+def r27_go_bytes(path, raw):
+    for migrated, frozen in R27_GO_LINES.get(path, ()):
+        if migrated.encode() not in raw:
+            raise ValueError('r27 go rewrite drifted: ' + path + ' ' + migrated)
+        raw = raw.replace(migrated.encode(), frozen.encode())
+    return raw
 
 def code_pin(path):
     # .py 生成器自带 r26 垫片：用其自身的迁移表还原冻结字节；.go 运行时代码保持原字节。
     # 换行拼写统一归一（与冻结口径一致：仅源码归一，冻结数据保留精确字节哈希）。
     if path.endswith('.py'):
-        spec = importlib.util.spec_from_file_location('r26_target_' + Path(path).stem, ROOT / path)
+        spec = importlib.util.spec_from_file_location('r26_target_' + Path(path).stem, r27_pin(path))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.sha(module.canonical_code_bytes().replace(b'\r\n', b'\n'))
-    return sha(Path(ROOT / path).read_bytes().replace(b'\r\n', b'\n'))
+    return sha(r27_go_bytes(path, Path(r27_pin(path)).read_bytes()).replace(b'\r\n', b'\n'))
 # --- r26-canonical: end ---
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -386,7 +430,7 @@ def assertions(case):
 
 def build(cases, readiness):
     # Reuse the frozen generator's identity/normalization validation without changing it.
-    spec = importlib.util.spec_from_file_location('read_fixture_validator', ROOT / 'scripts/prepare-customer-fixtures.py')
+    spec = importlib.util.spec_from_file_location('read_fixture_validator', VERIFY / 'prepare-customer-fixtures.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     expected_readiness = module.build(cases)['readiness']

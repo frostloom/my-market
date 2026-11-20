@@ -55,7 +55,7 @@ def main():
         source.mkdir()
         with tarfile.open(archive) as contents:
             contents.extractall(source, filter="data")
-        if (source / "go.mod").read_text().splitlines()[0] != "module github.com/frostloom/ai-gateway":
+        if (source / "go.mod").read_text().splitlines()[0] != "module github.com/frostloom/my-market":
             parser.error("wrong source module")
         binary = temporary / "paired-live"
         command = ["go", "build", "-mod=readonly", "-trimpath", "-buildvcs=false",

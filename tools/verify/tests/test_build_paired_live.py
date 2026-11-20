@@ -6,17 +6,17 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ArchiveTemporaryDirectoryTests(unittest.TestCase):
     def test_uses_platform_temp_directory_and_cleans_up_on_build_failure(self):
-        spec = importlib.util.spec_from_file_location('paired_archive_temp', ROOT / 'scripts/build-paired-live.py')
+        spec = importlib.util.spec_from_file_location('paired_archive_temp', ROOT / 'build-paired-live.py')
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); repo = root / 'repo'; repo.mkdir()
             system_temp = root / 'system-temp'; system_temp.mkdir()
-            (repo / 'go.mod').write_text('module github.com/frostloom/ai-gateway\n\ngo 1.25.12\n')
+            (repo / 'go.mod').write_text('module github.com/frostloom/my-market\n\ngo 1.25.12\n')
             def git(*args):
                 subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True)
             git('init', '-q', '-b', 'main'); git('add', 'go.mod')

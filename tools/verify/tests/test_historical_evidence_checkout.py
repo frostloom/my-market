@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
-REPO = ROOT.parent.parent  # R2.6-T2: 仓库根（顶层 eval/ 所在）
-SUMMARIZE = ROOT / 'scripts/summarize-offline-intent-audit.py'
+ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parent.parent  # R2.6-T2: 仓库根（顶层 eval/ 所在）；R2.7 起 ROOT=tools/verify
+SUMMARIZE = ROOT / 'summarize-offline-intent-audit.py'
 
 # Working-tree bytes compared with locked hashes by the CI verify commands.
 # 路径为仓库根相对路径（R2.6-T2 后 eval/ 位于仓库顶层）。

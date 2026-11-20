@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
 GIT = shutil.which("git")
 GIT_BASH = Path(GIT).resolve().parents[1] / "bin/bash.exe" if GIT else None
@@ -29,7 +29,7 @@ class StartupControlTokenTests(unittest.TestCase):
             root = Path(directory)
             (root / "scripts").mkdir()
             (root / "bin").mkdir()
-            shutil.copyfile(ROOT / "scripts/start-all.ps1", root / "scripts/start-all.ps1")
+            shutil.copyfile(ROOT.parent / 'legacy-ops' / 'start-all.ps1', root / "scripts/start-all.ps1")
             for name in ("billing", "router", "mock-provider", "gateway", "reconciler", "event-consumer", "agent"):
                 (root / "bin" / (name + ".exe")).touch()
             if dotenv is not None:

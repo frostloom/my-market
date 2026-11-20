@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 AUDIT = EVAL / 'reviews/2026-10-09-intent-offline-audit'
 DEFAULT_OUT = EVAL / 'contracts/2026-10-09-customer-service-v1'
 WRITE = {'recharge', 'refund_recharge', 'subscribe_plan', 'change_plan', 'cancel_subscription'}
@@ -42,10 +42,12 @@ def canonical_code_bytes(path=None):
     return text.encode('utf-8')
 
 def frozen_source_path(name):
-    """冻结 manifest 的 sources 名称跨 R2.6 布局搬迁解析：eval/ 前缀重锚到顶层
-    EVAL 下，其余（如 web/scripts/...）仍在 ROOT 下。"""
+    """冻结 manifest 的 sources 名称跨 R2.6/R2.7 布局搬迁解析：eval/ 前缀重锚到顶层
+    EVAL 下，web/ 前缀重锚到 services/gateway/web（R2.7），其余（历史 ROOT 相对）仍在 ROOT 下。"""
     if name.startswith('eval/'):
         return EVAL / name[len('eval/'):]
+    if name.startswith('web/'):
+        return WEBROOT / name[len('web/'):]
     return ROOT / name
 
 def frozen_source_bytes(name, path):
@@ -74,7 +76,19 @@ R26_WEB_GENERATOR_LINES = [
 
 R26_BEGIN = '# --- r26-canonical: begin ---'
 R26_END = '# --- r26-canonical: end ---'
+# R2.7 服务拆分：冻结 sources 里 `web/` 前缀的生成器现驻 services/gateway/web/
+# （树内非 eval 资产）。本脚本驻 tools/verify/ 后 ROOT=tools，仓库根=ROOT.parent；
+# WEBROOT 在哨兵块内定义，剥离后不进 canonical 字节。
+WEBROOT = ROOT.parent / 'services' / 'gateway' / 'web'
 MIGRATION_LINES = [
+    ("EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n",
+     "EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n"),
+    ("    generator = WEBROOT / 'scripts/gen-intent-suite.mjs'",
+     "    generator = ROOT / 'web/scripts/gen-intent-suite.mjs'"),
+    ("               WEBROOT / 'scripts/gen-intent-suite.mjs', EVAL / 'intent-suite/manifest.json']",
+     "               ROOT / 'web/scripts/gen-intent-suite.mjs', EVAL / 'intent-suite/manifest.json']"),
+    ("        base = (EVAL if name.startswith('eval/') else WEBROOT if name.startswith('web/') else ROOT).resolve()",
+     "        base = (EVAL if name.startswith('eval/') else ROOT).resolve()"),
     ("EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway\n", ''),
     ("AUDIT = EVAL / 'reviews/2026-10-09-intent-offline-audit'\n",
      "AUDIT = ROOT / 'eval/reviews/2026-10-09-intent-offline-audit'\n"),
@@ -135,7 +149,7 @@ def normalize_text(sample, proof):
 
 
 def normalization_proof(rows):
-    generator = ROOT / 'web/scripts/gen-intent-suite.mjs'
+    generator = WEBROOT / 'scripts/gen-intent-suite.mjs'
     manifest = read_json(EVAL / 'intent-suite/manifest.json')
     source = generator.read_text(encoding='utf-8')
     if manifest['generatedBy'] != 'web/scripts/gen-intent-suite.mjs' or 'text = `${text} #${n}`' not in source:
@@ -378,7 +392,7 @@ def export(output):
     proof = normalization_proof(rows)
     cases = [export_case(r, draft_index[r['id']], proof) for r in rows]
     sources = [AUDIT / 'reviews.json', AUDIT / 'draft-cases.json',
-               ROOT / 'web/scripts/gen-intent-suite.mjs', EVAL / 'intent-suite/manifest.json']
+               WEBROOT / 'scripts/gen-intent-suite.mjs', EVAL / 'intent-suite/manifest.json']
     manifest = {'schema_version': 1, 'version': 'customer-service-contract-v1', 'count': len(cases),
         'normalization_count': len(proof), 'human_independent_review_count': 0,
         'annotation_status': 'ai_posthoc_not_independent_gold', 'fixture_count': 0,
@@ -405,7 +419,7 @@ def verify_artifacts(output):
             raise ValueError('Artifact hash mismatch: ' + name)
     for name, digest in manifest.get('sources', {}).items():
         path = frozen_source_path(name).resolve()
-        base = (EVAL if name.startswith('eval/') else ROOT).resolve()
+        base = (EVAL if name.startswith('eval/') else WEBROOT if name.startswith('web/') else ROOT).resolve()
         if base not in path.parents or sha(frozen_source_bytes(name, path)) != digest:
             raise ValueError('Source hash mismatch: ' + name)
     if manifest.get('exporter_sha256') and sha(canonical_code_bytes()) != manifest['exporter_sha256']:

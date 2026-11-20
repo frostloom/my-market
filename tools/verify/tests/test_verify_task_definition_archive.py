@@ -6,11 +6,11 @@ import tempfile
 import shutil
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 class ArchiveVerificationTests(unittest.TestCase):
     def load(self):
-        spec = importlib.util.spec_from_file_location('archive_verifier', ROOT / 'scripts/verify-task-definition-archive.py')
+        spec = importlib.util.spec_from_file_location('archive_verifier', ROOT / 'verify-task-definition-archive.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module

@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL = ROOT.parent.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
+EVAL = ROOT.parent / 'eval' / 'ai-gateway'  # R2.6-T2: 评测资产移至仓库顶层 eval/ai-gateway
 
 
 def digest(raw):
@@ -41,7 +41,7 @@ def main():
             raise ValueError('Missing reviewed supporting report: ' + name)
     # Read credentials only for a no-export check. Never print matching values.
     credentials = []
-    for line in (ROOT / '.env').read_text(encoding='utf-8-sig').splitlines():
+    for line in (ROOT.parent / '.env').read_text(encoding='utf-8-sig').splitlines():
         name, sep, value = line.partition('=')
         if sep and name.strip().endswith('API_KEY'):
             value = value.strip().strip('\"\'').encode()

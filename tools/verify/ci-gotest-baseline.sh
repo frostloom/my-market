@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # ci-gotest-baseline.sh — ai-gateway 失败名基线门禁（honest green，不是绕过）。
 #
-# 用法（在 services/ai-gateway 模块内，或任意目录）：
-#   bash scripts/ci-gotest-baseline.sh scripts/ci-baseline-ai-gateway.txt
+# 用法（R2.7 起单模块，脚本自锚仓库根；任意目录可执行）：
+#   bash tools/verify/ci-gotest-baseline.sh tools/verify/ci-baseline-ai-gateway.txt
+# GOTEST_TARGET 环境变量可覆盖 go test 包面（默认 ./...；CI ai job 用它排除 mall
+# 集成测试——mall 侧由 mall job 绿测覆盖，基线只管 ai 域测试名）。
 #
 # 行为：
 #   1. 以 CGO_ENABLED=0 / AGENT_LIVE_JEV=0（不覆盖外部已设值）跑 `go test ./... -count=1`，
@@ -25,7 +27,7 @@
 set -uo pipefail
 
 BASELINE="${1:?usage: ci-gotest-baseline.sh <baseline-file>}"
-MODULE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+MODULE_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$MODULE_DIR"
 
 if [ ! -f "$BASELINE" ]; then
@@ -40,7 +42,7 @@ OUT="$(mktemp)"
 trap 'rm -f "$OUT" "$OUT.names"' EXIT
 
 rc=0
-go test ./... -count=1 | tee "$OUT"
+go test ${GOTEST_TARGET:-./...} -count=1 | tee "$OUT"
 rc=${PIPESTATUS[0]}
 
 # 顶层失败名：`--- FAIL: TestXxx`（行首无缩进；子测试行有缩进，天然被 ^ 排除）。
