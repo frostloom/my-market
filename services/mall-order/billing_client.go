@@ -1,11 +1,12 @@
 // billing_client.go：mall-order → billing 控制面的薄 gRPC 客户端（R2-T2）。
 //
-// import 边界（守卫测试 TestImportBoundary_OnlyPkgProto）：mall 侧唯一允许的
-// ai-gateway import 面 = github.com/frostloom/ai-gateway/pkg/proto/billing/v1。
-// 鉴权：billing gRPC 全方法经 ai-gateway 侧全局 UnaryServer 拦截器校验
-// X-Control-Token metadata（键名 controlplane.MetadataKey = "x-control-token"，
-// CONTROL_PLANE_TOKEN 同值共享）。ai-gateway 的 internal/pkg/controlplane 不可跨
-// 服务 import，键名以本文件常量落契约（T4 compose 注入同名 env 双侧对齐）。
+// import 边界（R2.7 白名单门禁 pkg/importguard，规则 1 mall 域隔离）：mall 侧唯一
+// 允许的 AI 域 import 面 = github.com/frostloom/my-market/pkg/proto/billing/v1
+// 契约（services/{billing,...}/** 一律禁 import）；internal 边界另由 Go 编译器强制。
+// 鉴权：billing gRPC 全方法经 billing 侧全局 UnaryServer 拦截器校验
+// X-Control-Token metadata（键名 pkg/controlplane.MetadataKey = "x-control-token"，
+// CONTROL_PLANE_TOKEN 同值共享）。pkg/controlplane 常量对 mall 开放但本文件
+// 不 import 它——键名以本文件常量落契约（T4 compose 注入同名 env 双侧对齐）。
 //
 // 调用点（R2-T3 已接线 / R2.5-T2 扩两方法）：worker credit 行履约 Credit
 // （worker.go creditLine）/ fulfilled 充值单冲退 Refund（refund.go）/
@@ -24,16 +25,16 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
-// 控制面契约常量（与 ai-gateway/internal/pkg/controlplane 同值）。
+// 控制面契约常量（与 billing 侧 pkg/controlplane 同值）。
 const (
 	// billingMetadataKey X-Control-Token 的 gRPC metadata 键（小写）。
 	billingMetadataKey = "x-control-token"
 	// billingAddrEnv billing gRPC 地址环境变量（T4 compose 注入 billing:9101）。
 	billingAddrEnv = "BILLING_ADDR"
-	// billingTokenEnv 控制面令牌环境变量（双侧同名共享，ai-gateway controlplane.Env）。
+	// billingTokenEnv 控制面令牌环境变量（双侧同名共享，pkg/controlplane.Env）。
 	billingTokenEnv = "CONTROL_PLANE_TOKEN"
 	// billingDefaultAddr dev 缺省（compose 宿主映射口）。
 	billingDefaultAddr = "127.0.0.1:9101"
@@ -54,7 +55,7 @@ type BillingClient interface {
 var _ BillingClient = billingv1.NewBillingServiceClient(nil)
 
 // tokenUnaryClient 出站一元拦截器：每请求注入 X-Control-Token metadata
-// （ai-gateway controlplane.UnaryClient 同款语义；mall 侧自持实现）。
+// （pkg/controlplane.UnaryClient 同款语义；mall 侧自持实现）。
 func tokenUnaryClient(secret string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any,
 		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {

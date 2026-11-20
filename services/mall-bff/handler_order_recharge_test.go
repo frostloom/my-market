@@ -22,9 +22,9 @@ import (
 
 // rpcRecorder 记录 createRech/createCart 收到的请求（并发安全）。
 type rpcRecorder struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	recharge []*mallv1.CreateRechargeOrderReq
-	cart    []*mallv1.CreateCartOrderReq
+	cart     []*mallv1.CreateCartOrderReq
 }
 
 func (r *rpcRecorder) rechargeCalls() []*mallv1.CreateRechargeOrderReq {

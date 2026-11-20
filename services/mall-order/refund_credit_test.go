@@ -4,7 +4,7 @@
 // general 行直退 + 回补库存（既有口径），subscription 行退订不退费
 // （R2.5-T3，见 refund_subscribe_test.go）。
 //
-// TestRefund_FulfilledRecharge_MinRule 连真 billing（spawn ai-gateway cmd/billing
+// TestRefund_FulfilledRecharge_MinRule 连真 billing（spawn services/billing/cmd/billing
 // 子进程，见 worker_credit_test.go 的 harness）三态：
 //  1. 余额充足 → 全退（refunded = face+bonus）；
 //  2. 余额不足 → 部分退（refunded = min < 请求额）；
@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"testing"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 func TestRefund_FulfilledRecharge_MinRule(t *testing.T) {

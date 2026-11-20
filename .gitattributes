@@ -32,5 +32,7 @@ eval/ai-gateway/paired-pilots/2026-10-16-langfuse-workbench-preflight-v3/** -tex
 # Windows CRLF 修复（run 44662031308）：r26-canonical 垫片、冻结 manifest 的生成器/
 # exporter pin 与冻结 sources 哈希都要求脚本字节跨平台精确；-text 禁用 checkout 换行
 # 换算（仓库内字节即唯一真字节，LF 保持 LF）。tests/fixtures 与 helpers/*.go.txt 同受保护。
-services/ai-gateway/scripts/** -text
-services/ai-gateway/web/scripts/*.mjs -text
+tools/verify/** -text
+services/gateway/web/scripts/*.mjs -text
+# R2.7 承接 services/ai-gateway/.gitattributes（nested 规则随服务树拆分上移）
+tools/verify/langfuse-workbench.py whitespace=cr-at-eol

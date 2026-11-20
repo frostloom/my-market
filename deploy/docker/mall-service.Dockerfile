@@ -8,15 +8,12 @@
 #   mall-order  gRPC 9112 + HTTP 健康口 9120（/healthz）
 #   mall-bff    HTTP 18090（/api/v1 + /healthz）
 #
-# 与 services/ai-gateway/deploy/docker/go-service.Dockerfile 同源口径，差异三点：
-#   1) 构建上下文 = my-market 仓库根（根模块 github.com/frostloom/my-market），
-#      非 services/ai-gateway/ 子仓；
-#   2) 根模块 go.mod 要求 go 1.26.0 → 构建镜像用 golang:1.26-alpine（ai 侧 1.25）；
-#   3) GOWORK=off 单模块构建；R2 起根模块以 replace ./services/ai-gateway 依赖
-#      ai-gateway/pkg/proto/billing/v1（billingv1，mall 侧唯一 ai-gateway import
-#      面，importguard 守卫）→ 需同步 COPY 该包与 services/ai-gateway/go.mod（仅
-#      go.mod 即可，pruned graph 不读 ai-gateway 的 go.sum；构建依赖 grpc/protobuf
-#      根模块已 require，无新增下载）。
+# 与 deploy/docker/go-service.Dockerfile 同源口径，差异两点：
+#   1) SVC 语义：mall 侧为 services/<svc> 顶层包（无 cmd/ 层），ai 侧为
+#      services/<svc>/cmd/<svc> 全路径；
+#   2) ai 侧曾依赖的 services/ai-gateway replace/COPY（R2.6 跨模块形态）自 R2.7
+#      起随单模块合并消失——billing proto 已在 pkg/proto/billing/v1，整树 COPY
+#      已覆盖，无需任何额外放行。
 #
 # 注意：不要加 `# syntax=docker/dockerfile:1` 指令——那会从 docker.io 拉取 frontend
 # 镜像，国内网络不可达，整个构建会卡死/DeadlineExceeded（ai 侧 2026-11-18 实测两次）。
@@ -33,15 +30,9 @@ ENV GOPROXY=https://goproxy.cn,direct \
 WORKDIR /src
 ARG SVC
 COPY go.mod go.sum ./
-# R2：mall-order/mall-bff import billingv1（replace ./services/ai-gateway）→ 需被
-# 替换模块的 go.mod + import 面（仅 pkg/proto/billing；不整拷 services/ai-gateway/）。
-# COPY 目的地路径须与 go.mod replace 指向一致（./services/ai-gateway）。
-COPY services/ai-gateway/go.mod ./services/ai-gateway/go.mod
-COPY services/ai-gateway/pkg/proto/billing ./services/ai-gateway/pkg/proto/billing
 RUN go mod download
 # 根模块构建面：pkg/（mallerr/mallpage 公共库）+ proto/（契约 .proto 源）+
-# services/（mallv1 生成码 + 各服务入口）。go.work / services/ai-gateway/ 刻意不进镜像
-# （后者由 .dockerignore 整目录排除，仅放行上面两项）。
+# services/（mallv1 生成码 + 各服务入口）。
 COPY pkg ./pkg
 COPY proto ./proto
 COPY services ./services

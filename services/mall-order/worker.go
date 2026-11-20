@@ -31,8 +31,8 @@ import (
 	"log"
 	"time"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // worker 节奏常量（brief：履约 10s / 超时扫描 60s / 订单超时 30 分钟）。

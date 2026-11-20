@@ -1,0 +1,114 @@
+// reconciler 对账服务入口：周期扫描滞留 pending 账单并收敛（M4）。
+//
+//	模式 1（默认）：常驻，每 -interval 跑一轮 sweep + rebuild；
+//	模式 2（-once）：只跑一轮就退出（场景脚本/手动验证用）。
+//
+// 读：MySQL bills 只读扫描。写：一律走 billing 幂等 RPC。
+package main
+
+import (
+	"context"
+	"flag"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/frostloom/my-market/pkg/config"
+	"github.com/frostloom/my-market/pkg/controlplane"
+	"github.com/frostloom/my-market/pkg/logger"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
+	"github.com/frostloom/my-market/services/billing/internal/reconciler"
+)
+
+func main() {
+	var once, noSweep, noRebuild, noAutoReverse bool
+	var intervalSec, graceSec int
+	flag.BoolVar(&once, "once", false, "只跑一轮就退出（场景脚本用）")
+	flag.BoolVar(&noSweep, "no-sweep", false, "跳过 sweep（只跑 rebuild）")
+	flag.BoolVar(&noRebuild, "no-rebuild", false, "跳过 rebuild（只跑 sweep，压测期间用）")
+	flag.BoolVar(&noAutoReverse, "no-auto-reverse", true, "保留无用量的 pending 账单，仍补结算已上报用量（显式设为 false 可恢复旧行为）")
+	flag.IntVar(&intervalSec, "interval", 30, "对账周期（秒）")
+	flag.IntVar(&graceSec, "grace", 600, "宽限期（秒）：created_at 早于 now-grace 才处理")
+	flag.Parse()
+
+	log := logger.New(config.Getenv("LOG_LEVEL", "info"))
+	controlToken := controlplane.Require(log)
+	dsn := config.Getenv("MYSQL_DSN", "root:root@tcp(127.0.0.1:3307)/ai_gateway?charset=utf8mb4&parseTime=True&loc=Local")
+	billingAddr := config.Getenv("BILLING_ADDR", "127.0.0.1:9101")
+
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Error)})
+	if err != nil {
+		log.Error("connect mysql", "err", err)
+		os.Exit(1)
+	}
+	// 对账也是常驻进程，同样限连接池，避免多个进程一起把 MySQL 连接挤爆（端口耗尽）。
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(10)
+		sqlDB.SetMaxIdleConns(5)
+	}
+	conn, err := controlplane.Dial(billingAddr, controlToken)
+	if err != nil {
+		log.Error("connect billing", "err", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	var options []reconciler.Option
+	if noAutoReverse {
+		options = append(options, reconciler.WithoutAutoReverse())
+	} else {
+		options = append(options, reconciler.WithAutoReverse())
+	}
+	r := reconciler.New(db, billingv1.NewBillingServiceClient(conn), log, time.Duration(graceSec)*time.Second, options...)
+
+	// 观测 HTTP：/healthz + /status（端口 9106，供网关 /admin/health 聚合与运维探活）。
+	httpPort := config.Getenv("RECONCILER_PORT", "9106")
+	go func() {
+		log.Info("reconciler http listening", "port", httpPort)
+		if err := http.ListenAndServe(config.ListenAddr(httpPort), r.HTTPHandler()); err != nil {
+			log.Error("reconciler http serve", "err", err)
+		}
+	}()
+
+	log.Info("reconciler starting", "once", once, "interval", intervalSec, "grace", graceSec, "no_sweep", noSweep, "no_rebuild", noRebuild, "no_auto_reverse", noAutoReverse)
+
+	if once {
+		var s reconciler.Stats
+		var err error
+		failed := false
+		if !noSweep {
+			s, err = r.SweepOnce(context.Background())
+			if err != nil {
+				failed = true
+				log.Error("sweep", "err", err)
+			}
+			failed = failed || s.SettleErrors > 0 || s.ReverseErrors > 0
+		}
+		var rb reconciler.Stats
+		if !noRebuild {
+			rb, err = r.RebuildAll(context.Background())
+			if err != nil {
+				failed = true
+				log.Error("rebuild", "err", err)
+			}
+			failed = failed || rb.RebuildErrors > 0
+		}
+		log.Info("one-shot done", "scanned", s.Scanned, "reversed", s.Reversed,
+			"settled", s.Settled, "held", s.Held, "rebuilt", rb.Rebuilt,
+			"settle_errors", s.SettleErrors, "reverse_errors", s.ReverseErrors, "rebuild_errors", rb.RebuildErrors)
+		if failed {
+			os.Exit(1)
+		}
+		return
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	r.Run(ctx, time.Duration(intervalSec)*time.Second, noSweep, noRebuild)
+}

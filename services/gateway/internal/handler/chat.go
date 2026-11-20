@@ -1,0 +1,829 @@
+// Package handler gateway 的 OpenAI 兼容 HTTP 处理。
+// chat.go：/v1/chat/completions 编排（非流式 + SSE 流式）——
+//
+//	路由 → 预占 → 转发上游 → ReportUsage+结算（独立后台 ctx） → 失败保持 pending（M4 对账冲正）
+//
+// 计费规则：读到 usage 帧按实际上报结算。已经转发过正文但没有 usage 时，
+// 用已转发文本估算 completion 并结算，避免对账把已交付内容全额退掉。
+// 一个正文都没转发则保持 pending。首字节前拨号失败或 5xx 会换 provider，
+// 全部失败则立即 Reverse 并返回 502。
+package handler
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/frostloom/my-market/pkg/upstream"
+	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/frostloom/my-market/pkg/controlplane"
+	"github.com/frostloom/my-market/pkg/gatewayclient"
+	"github.com/frostloom/my-market/pkg/metrics"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
+	"github.com/frostloom/my-market/pkg/tokens"
+)
+
+// billingAPI / routingAPI 是网关编排依赖的最小面，测试用假实现锁住计费分支。
+type billingAPI interface {
+	Reserve(ctx context.Context, req *billingv1.ReserveRequest) (*billingv1.ReserveResponse, error)
+	ReportUsage(ctx context.Context, req *billingv1.ReportUsageRequest) (*billingv1.ReportUsageResponse, error)
+	Settle(ctx context.Context, req *billingv1.SettleRequest) (*billingv1.SettleResponse, error)
+	Reverse(ctx context.Context, req *billingv1.ReverseRequest) (*billingv1.ReverseResponse, error)
+}
+
+type routingAPI interface {
+	Route(ctx context.Context, model string, exclude ...uint64) (*client.RouteResult, error)
+	Report(ctx context.Context, providerID uint64, ok bool)
+}
+
+// reportProvider 把平台失败告诉路由。成功在 Redis 计数方案里不写任何东西，不再等这趟回报。
+func reportProvider(ctx context.Context, r routingAPI, prov *client.RouteResult, ok bool) {
+	if ok && prov != nil && prov.SkipSuccessReport {
+		return
+	}
+	r.Report(ctx, prov.ProviderID, ok)
+}
+
+type chatRequest struct {
+	Model     string        `json:"model"`
+	Messages  []chatMessage `json:"messages"`
+	MaxTokens int           `json:"max_tokens,omitempty"` // 缺席不转发：真实上游用模型默认值（0 会被 OpenAI 兼容接口拒掉）
+	Stream    bool          `json:"stream"`
+	raw       []byte        // 客户端原文。Pi 会带 content 数组、tools、max_completion_tokens，必须原样转给上游。
+}
+
+type chatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// providerChatResponse 只关心 usage 字段；完整响应透传回客户端。
+type providerChatResponse struct {
+	Usage *usage `json:"usage"`
+}
+
+type usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
+// 上游转发复用同一个 http.Client（Transport 连接池复用）。
+// 压测教训 1：每次请求 new Client 会新建 Transport/连接，高并发下疯狂建连把 Windows
+// 临时端口占满 → dial mysql: Only one usage of each socket address。必须复用。
+// 压测教训 2：池不能只够 64/host——300 并发时并发持有 >64 条上游连接，多出的在响应后
+// 被关闭进 TIME_WAIT，堆积同样打爆临时端口。池子要能容纳峰值并发（压测 300/500 复用）。
+var (
+	upstreamClient = &http.Client{
+		Timeout:       2 * time.Minute,
+		Transport:     &http.Transport{MaxIdleConns: 2048, MaxIdleConnsPerHost: 1024},
+		CheckRedirect: rejectUpstreamRedirect,
+	}
+	streamClient = &http.Client{ // 流式无总超时（长连接），靠请求 ctx 取消
+		Transport:     &http.Transport{MaxIdleConns: 2048, MaxIdleConnsPerHost: 1024},
+		CheckRedirect: rejectUpstreamRedirect,
+	}
+)
+
+func rejectUpstreamRedirect(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+// Chat 编排入口：鉴权/限流/幂等已在中间件完成，这里只负责「路由→预占→转发→收尾」。
+// Omitted holdUnknown defaults to retaining bills when the upstream outcome is unknown.
+func Chat(b billingAPI, r routingAPI, log *slog.Logger, upstreamTimeout time.Duration, holdUnknown ...bool) gin.HandlerFunc {
+	conservative := len(holdUnknown) == 0 || holdUnknown[0]
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 8<<20))
+		if err != nil || len(body) == 0 {
+			abort(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		req, err := parseChatBody(body)
+		if err != nil {
+			abort(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		tenantID := c.GetInt64("tenant_id")
+		apiKeyID := c.GetInt64("api_key_id")
+		requestID := c.GetString("request_id")
+		estPrompt := estimateMessages(&req)
+
+		// 1) 路由：选 provider（无可用直接 503，没产生任何计费动作）
+		routeStart := time.Now()
+		prov, err := r.Route(c.Request.Context(), req.Model)
+		metrics.RequestHop("route", time.Since(routeStart))
+		if err != nil {
+			abort(c, http.StatusServiceUnavailable, "routing unavailable")
+			return
+		}
+		if prov == nil {
+			abort(c, http.StatusServiceUnavailable, "no available provider for model")
+			return
+		}
+
+		// 2) 预占：先扣后用，防超卖/防白嫖
+		rc, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		requestDigest := sha256.Sum256(chatUpstreamBody(&req))
+		rc = controlplane.WithReserveContent(rc, hex.EncodeToString(requestDigest[:]))
+		reserveStart := time.Now()
+		rr, err := b.Reserve(rc, &billingv1.ReserveRequest{
+			RequestId:           requestID,
+			TenantId:            tenantID,
+			ApiKeyId:            apiKeyID,
+			ProviderId:          int64(prov.ProviderID),
+			Model:               req.Model,
+			EstPromptTokens:     estPrompt,
+			MaxCompletionTokens: int64(req.MaxTokens),
+		})
+		metrics.RequestHop("reserve", time.Since(reserveStart))
+		cancel()
+		if err != nil {
+			// 目录里没有/下架的模型 → billing 返回 InvalidArgument，映射为 400「模型未上架/已下架」
+			if status.Code(err) == codes.FailedPrecondition {
+				abort(c, http.StatusConflict, "billing request id conflict")
+				return
+			}
+			if status.Code(err) == codes.InvalidArgument {
+				abort(c, http.StatusBadRequest, "model not listed or disabled: "+req.Model)
+				return
+			}
+			abort(c, http.StatusServiceUnavailable, "billing unavailable")
+			return
+		}
+		if rr == nil {
+			abort(c, http.StatusServiceUnavailable, "billing unavailable")
+			return
+		}
+		if rr.Code == billingv1.ReserveCode_RESERVE_INSUFFICIENT {
+			abort(c, http.StatusPaymentRequired, "insufficient balance")
+			return
+		}
+		if rr.Code == billingv1.ReserveCode_RESERVE_SUB_QUOTA {
+			abort(c, http.StatusPaymentRequired, "订阅额度不足，每 N 小时滚动刷新")
+			return
+		}
+		if rr.Code == billingv1.ReserveCode_RESERVE_DUPLICATE {
+			abort(c, http.StatusConflict, "billing request already reserved")
+			return
+		}
+		if rr.Code != billingv1.ReserveCode_RESERVE_OK || rr.BillId <= 0 {
+			abort(c, http.StatusServiceUnavailable, "billing unavailable")
+			return
+		}
+		billID := rr.BillId
+		log.Info("reserved", "request_id", requestID, "tenant_id", tenantID, "model", req.Model,
+			"provider", prov.Name, "stream", req.Stream, "est_prompt", estPrompt, "balance_after", rr.BalanceAfter)
+
+		if req.Stream {
+			relayStream(c, b, r, log, prov, &req, requestID, billID, estPrompt, conservative)
+			return
+		}
+		forwardNonStream(c, b, r, log, prov, &req, requestID, billID, estPrompt, upstreamTimeout, conservative)
+	}
+}
+
+// ---------- 非流式 ----------
+
+// forwardNonStream 转发上游，带 provider failover（M5）。
+// 只在「首个字节前失败」重试：建连失败 / 5xx。此时客户端还没收到任何响应，
+// 重试另一个 provider 不会双扣（Reserve 是 per-request 幂等的）。4xx 是业务拒绝
+// （provider 正常，只是拒绝请求），不重试，直接透传退款。流中途失败绝不重试（M3 规则）。
+func forwardNonStream(c *gin.Context, b billingAPI, r routingAPI, log *slog.Logger, prov *client.RouteResult, req *chatRequest, requestID string, billID int64, estPrompt int64, upstreamTimeout time.Duration, holdUnknown ...bool) {
+	conservative := len(holdUnknown) > 0 && holdUnknown[0]
+	requestCtx := c.Request.Context()
+	if upstreamTimeout > 0 {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(requestCtx, upstreamTimeout)
+		defer cancel()
+	}
+	// tried：本请求已尝试失败的 provider。failover 必须换一个节点——排除后重路由，
+	// 避免加权随机再次选中同一个坏 provider（第一次试就失败，说明它此刻就是坏的）。
+	tried := map[uint64]bool{}
+	failover := func(providerID uint64) bool {
+		tried[providerID] = true
+		r.Report(c.Request.Context(), providerID, false)
+		if next, rerr := r.Route(c.Request.Context(), req.Model, triedSlice(tried)...); rerr == nil && next != nil {
+			prov = next
+			return true
+		}
+		return false
+	}
+
+	for attempt := 0; attempt < 3; attempt++ {
+		upstreamBody := chatUpstreamBody(req)
+		uReq, err := newChatUpstreamRequest(requestCtx, prov.BaseURL, upstreamBody)
+		if err != nil {
+			reverseWithBackground(b, log, requestID, billID, "build upstream request failed")
+			abort(c, http.StatusBadGateway, "upstream error")
+			return
+		}
+		setUpstreamHeaders(uReq, c, false, prov.APIKey)
+
+		upstreamStart := time.Now()
+		upResp, err := upstreamClient.Do(uReq)
+		if err != nil {
+			if conservative {
+				reportProvider(c.Request.Context(), r, prov, false)
+				log.Warn("upstream outcome unknown; bill left pending", "request_id", requestID, "err", err)
+				abort(c, http.StatusBadGateway, "upstream outcome unknown")
+				return
+			}
+			// 建连失败：provider 故障 → 上报 + 换下一个
+			log.Warn("upstream dial failed, failover", "provider", prov.Name, "attempt", attempt+1, "err", err)
+			if failover(prov.ProviderID) {
+				continue
+			}
+			break
+		}
+		// 5xx 不读错误正文，避免上游不结束响应时把请求挂住。4xx 有明确拒绝，按原状态和正文退回。
+		if conservative && upResp.StatusCode >= 500 {
+			upResp.Body.Close()
+			reportProvider(c.Request.Context(), r, prov, false)
+			log.Warn("upstream 5xx", "request_id", requestID, "status", upResp.StatusCode)
+			reverseWithBackground(b, log, requestID, billID, "upstream status "+upResp.Status)
+			abort(c, http.StatusBadGateway, "upstream rejected request")
+			return
+		}
+		if conservative && upResp.StatusCode/100 != 2 {
+			statusCode := upResp.StatusCode
+			errBody := readLimitedBody(upResp.Body)
+			reportProvider(c.Request.Context(), r, prov, true)
+			log.Warn("upstream rejected request; precharge refunded", "request_id", requestID, "status", statusCode)
+			reverseWithBackground(b, log, requestID, billID, "upstream status "+upResp.Status)
+			writeUpstreamBody(c, statusCode, errBody)
+			return
+		}
+		body, readErr := io.ReadAll(upResp.Body)
+		upResp.Body.Close()
+		if readErr != nil {
+			// The upstream may have executed the request. Do not treat an
+			// incomplete response as usage, retry it, or refund it here.
+			log.Error("upstream response incomplete", "request_id", requestID, "err", readErr)
+			abort(c, http.StatusBadGateway, "upstream response incomplete")
+			return
+		}
+		if upResp.StatusCode/100 != 2 {
+			if upResp.StatusCode >= 500 {
+				// provider 故障（5xx）→ 上报 + failover
+				log.Warn("upstream 5xx, failover", "provider", prov.Name, "status", upResp.StatusCode, "attempt", attempt+1)
+				if failover(prov.ProviderID) {
+					continue
+				}
+				break
+			}
+			// 4xx：业务拒绝，provider 正常 → 不重试，直接退款透传
+			reportProvider(c.Request.Context(), r, prov, true)
+			reverseWithBackground(b, log, requestID, billID, "upstream 4xx: "+upResp.Status)
+			c.Data(upResp.StatusCode, "application/json", body)
+			return
+		}
+
+		// A complete transfer is not necessarily a valid provider response.
+		// Keep the bill pending when the response cannot supply reliable usage.
+		var pr *providerChatResponse
+		if err := json.Unmarshal(body, &pr); err != nil || pr == nil ||
+			(pr.Usage != nil && (pr.Usage.PromptTokens < 0 || pr.Usage.CompletionTokens < 0)) {
+			log.Error("upstream response invalid", "request_id", requestID)
+			abort(c, http.StatusBadGateway, "upstream response invalid")
+			return
+		}
+		if pr.Usage != nil {
+			var presence struct {
+				Usage *struct {
+					PromptTokens     *int `json:"prompt_tokens"`
+					CompletionTokens *int `json:"completion_tokens"`
+				} `json:"usage"`
+			}
+			if err := json.Unmarshal(body, &presence); err != nil || presence.Usage == nil || presence.Usage.PromptTokens == nil || presence.Usage.CompletionTokens == nil {
+				log.Error("upstream usage incomplete", "request_id", requestID)
+				abort(c, http.StatusBadGateway, "upstream response invalid")
+				return
+			}
+		}
+		// 成功：Redis 计数方案不回报。没配 Redis 时仍回报，用来结束探测。
+		metrics.RequestHop("upstream", time.Since(upstreamStart))
+		reportProvider(c.Request.Context(), r, prov, true)
+		if conservative && pr.Usage == nil {
+			log.Warn("upstream response lacks usage; bill left pending", "request_id", requestID)
+			c.Data(http.StatusOK, "application/json", body)
+			return
+		}
+		prompt, completion := estPrompt, int64(0)
+		if pr.Usage != nil {
+			prompt = int64(pr.Usage.PromptTokens)
+			completion = int64(pr.Usage.CompletionTokens)
+		}
+		settleAndLog(c, b, log, requestID, billID, prompt, completion, int64(prov.ProviderID))
+		c.Data(http.StatusOK, "application/json", body)
+		return
+	}
+
+	// 所有 provider 都失败 → 退款（非流式边界清晰，直接退，不需要对账）
+	log.Error("all providers failed", "request_id", requestID, "model", req.Model)
+	reverseWithBackground(b, log, requestID, billID, "all providers failed")
+	abort(c, http.StatusBadGateway, "all providers unavailable")
+}
+
+// ---------- SSE 流式 ----------
+
+// relayStream 逐帧透传上游 SSE。逐帧 Flush，让客户端看到增量。
+//
+// 首字节前（拨号失败 / 5xx）与非流式一样最多换 2 次 provider。全部失败则立即 Reverse
+// 并返回 502，不先承诺 SSE，也不把额度锁到对账宽限期。
+//
+// 结算规则：
+//   - 读到 usage 帧 → 按上报结算；
+//   - 已经转发过正文但没有 usage（客户端断连或上游提前结束）→ 用已转发文本估算 token 并结算，
+//     避免对账把已经交付的内容全额退掉；
+//   - 一个正文都没转发 → 保持 pending，交给对账。
+func relayStream(c *gin.Context, b billingAPI, r routingAPI, log *slog.Logger, prov *client.RouteResult, req *chatRequest, requestID string, billID int64, estPrompt int64, holdUnknown ...bool) {
+	conservative := len(holdUnknown) > 0 && holdUnknown[0]
+	tried := map[uint64]bool{}
+	failover := func(providerID uint64) bool {
+		tried[providerID] = true
+		r.Report(c.Request.Context(), providerID, false)
+		if next, rerr := r.Route(c.Request.Context(), req.Model, triedSlice(tried)...); rerr == nil && next != nil {
+			prov = next
+			return true
+		}
+		return false
+	}
+
+	var upResp *http.Response
+	for attempt := 0; attempt < 3; attempt++ {
+		upstreamBody := chatUpstreamBody(req)
+		uReq, err := newChatUpstreamRequest(c.Request.Context(), prov.BaseURL, upstreamBody)
+		if err != nil {
+			reverseWithBackground(b, log, requestID, billID, "build stream request failed")
+			abort(c, http.StatusBadGateway, "upstream error")
+			return
+		}
+		setUpstreamHeaders(uReq, c, true, prov.APIKey)
+
+		resp, err := streamClient.Do(uReq)
+		if err != nil {
+			if conservative {
+				reportProvider(c.Request.Context(), r, prov, false)
+				log.Warn("upstream stream outcome unknown; bill left pending", "request_id", requestID, "err", err)
+				abort(c, http.StatusBadGateway, "upstream outcome unknown")
+				return
+			}
+			log.Warn("upstream dial failed, failover", "provider", prov.Name, "attempt", attempt+1, "err", err)
+			if failover(prov.ProviderID) {
+				continue
+			}
+			break
+		}
+		if conservative && resp.StatusCode/100 != 2 && resp.StatusCode < 500 {
+			statusCode := resp.StatusCode
+			errBody := readLimitedBody(resp.Body)
+			reportProvider(c.Request.Context(), r, prov, true)
+			log.Warn("upstream stream rejected request; precharge refunded", "request_id", requestID, "status", statusCode)
+			reverseWithBackground(b, log, requestID, billID, "upstream status "+resp.Status)
+			writeUpstreamBody(c, statusCode, errBody)
+			return
+		}
+		if resp.StatusCode >= 500 {
+			// An error body may never reach EOF. Close it immediately so failover
+			// and refund do not wait on an unbounded stream read.
+			resp.Body.Close()
+			log.Warn("upstream 5xx, failover", "provider", prov.Name, "status", resp.StatusCode, "attempt", attempt+1)
+			if failover(prov.ProviderID) {
+				continue
+			}
+			break
+		}
+		if resp.StatusCode/100 != 2 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			reportProvider(c.Request.Context(), r, prov, true)
+			reverseWithBackground(b, log, requestID, billID, "upstream 4xx: "+resp.Status)
+			c.Data(resp.StatusCode, "application/json", body)
+			return
+		}
+		upResp = resp
+		break
+	}
+	if upResp == nil {
+		log.Error("all stream providers failed", "request_id", requestID, "model", req.Model)
+		reverseWithBackground(b, log, requestID, billID, "all providers failed")
+		abort(c, http.StatusBadGateway, "all providers unavailable")
+		return
+	}
+	defer upResp.Body.Close()
+
+	// 流成功建立之后才写 SSE 头。中途失败不再换上游。成功不回报。
+	reportProvider(c.Request.Context(), r, prov, true)
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Error("response writer not flushable", "request_id", requestID)
+		return
+	}
+
+	var (
+		reader       = bufio.NewReader(upResp.Body)
+		usageSeen    *usage
+		invalidUsage bool
+		doneSeen     bool
+		wroteAny     bool
+		sawText      bool
+		forwarded    strings.Builder
+	)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil && (err != io.EOF || len(line) == 0) {
+			if err != io.EOF && usageSeen == nil && !sawText {
+				log.Warn("upstream stream interrupted before content", "request_id", requestID, "err", err)
+			}
+			break
+		}
+		// The provider's usage is authoritative even if the client disconnects
+		// while this already-received frame is being forwarded.
+		if u, invalid := parseUsageFrameChecked(string(line)); invalid {
+			invalidUsage = true
+		} else if u != nil {
+			usageSeen = u
+		}
+		n, werr := w.Write(line)
+		wroteAny = wroteAny || n > 0
+		if werr != nil {
+			log.Warn("client disconnected mid-stream", "request_id", requestID)
+			break
+		}
+		flusher.Flush()
+		if text := streamDeltaText(string(line)); text != "" {
+			sawText = true
+			// Only legacy estimate-based settlement needs the complete text.
+			if !conservative {
+				forwarded.WriteString(text)
+			}
+		}
+		// Only the SSE data sentinel terminates the stream; model content may
+		// legitimately contain the literal text "[DONE]".
+		trimmed := strings.TrimSpace(string(line))
+		if strings.HasPrefix(trimmed, "data:") && strings.TrimSpace(strings.TrimPrefix(trimmed, "data:")) == "[DONE]" {
+			doneSeen = true
+			break
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+
+	if !wroteAny {
+		c.Header("Content-Type", "application/json; charset=utf-8")
+		abort(c, http.StatusBadGateway, "upstream stream incomplete")
+		// A failed first write does not erase a complete usage frame already
+		// received from the provider. No usage still remains unresolved.
+		if usageSeen == nil || invalidUsage {
+			return
+		}
+	}
+	if invalidUsage {
+		log.Warn("stream contained invalid usage, bill left pending", "request_id", requestID)
+		return
+	}
+	if usageSeen != nil {
+		settleAndLog(c, b, log, requestID, billID, int64(usageSeen.PromptTokens), int64(usageSeen.CompletionTokens), int64(prov.ProviderID))
+		return
+	}
+	if conservative {
+		log.Warn("stream lacks usage; bill left pending", "request_id", requestID, "done", doneSeen)
+		return
+	}
+	if text := strings.TrimSpace(forwarded.String()); text != "" {
+		completion := int64(tokens.Count(req.Model, text))
+		if completion < 1 {
+			completion = 1
+		}
+		log.Info("stream ended without usage, settling estimate", "request_id", requestID, "completion_tokens", completion)
+		settleAndLog(c, b, log, requestID, billID, estPrompt, completion, int64(prov.ProviderID))
+		return
+	}
+	log.Info("stream incomplete, bill left pending", "request_id", requestID, "done", doneSeen)
+}
+
+// streamDeltaText 取出一帧里已经生成的正文，供断连时估算 completion token。
+func streamDeltaText(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return ""
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+	if payload == "" || payload == "[DONE]" {
+		return ""
+	}
+	var frame struct {
+		Choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(payload), &frame); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, ch := range frame.Choices {
+		b.WriteString(ch.Delta.Content)
+		b.WriteString(ch.Message.Content)
+	}
+	return b.String()
+}
+
+// parseUsageFrame 从 SSE data 行解析终态 usage。
+func parseUsageFrame(line string) *usage {
+	u, _ := parseUsageFrameChecked(line)
+	return u
+}
+
+func parseUsageFrameChecked(line string) (*usage, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return nil, false
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+	if payload == "" || payload == "[DONE]" {
+		return nil, false
+	}
+	var frame struct {
+		Choices []struct {
+			FinishReason *string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(payload), &frame); err != nil {
+		return nil, false
+	}
+	if len(frame.Usage) > 0 && string(frame.Usage) != "null" {
+		for _, choice := range frame.Choices {
+			if choice.FinishReason == nil || *choice.FinishReason == "" {
+				return nil, true
+			}
+		}
+		var value struct {
+			PromptTokens     *int `json:"prompt_tokens"`
+			CompletionTokens *int `json:"completion_tokens"`
+		}
+		if err := json.Unmarshal(frame.Usage, &value); err != nil || value.PromptTokens == nil || value.CompletionTokens == nil || *value.PromptTokens < 0 || *value.CompletionTokens < 0 {
+			return nil, true
+		}
+		return &usage{PromptTokens: *value.PromptTokens, CompletionTokens: *value.CompletionTokens}, false
+	}
+	return nil, false
+}
+
+// ---------- 收尾与公共 helpers ----------
+
+// triedSlice 把「本请求已试失败」的 provider 集合转成切片传给 router 的 exclude 参数。
+func triedSlice(tried map[uint64]bool) []uint64 {
+	out := make([]uint64, 0, len(tried))
+	for id := range tried {
+		out = append(out, id)
+	}
+	return out
+}
+
+// settleAndLog 把实测用量放进同一次结算。现金预占行不再为用量单独提交。
+func settleAndLog(c *gin.Context, b billingAPI, log *slog.Logger, requestID string, billID, prompt, completion, providerID int64) {
+	settleCtx, settleCancel := client.BackgroundCtx(10 * time.Second)
+	defer settleCancel()
+	settleCtx = controlplane.WithSettleUsage(settleCtx, controlplane.SettleUsage{
+		Prompt: prompt, Completion: completion, Provider: providerID,
+	})
+	stageStart := time.Now()
+	sResp, errS := b.Settle(settleCtx, &billingv1.SettleRequest{RequestId: requestID, BillId: billID})
+	metrics.BillingCompletionStage("settle", time.Since(stageStart))
+	if errS != nil || sResp == nil || !sResp.Settled {
+		metrics.BillingCompletion("settlement_unacknowledged")
+		log.Error("settle failed, reconciliation will catch up", "request_id", requestID, "err_settle", errS)
+		return
+	}
+	metrics.BillingCompletion("settlement_acknowledged")
+	log.Info("settled", "request_id", requestID, "delta_quota", sResp.DeltaQuota, "balance_after", sResp.BalanceAfter)
+}
+
+func setUpstreamHeaders(uReq *http.Request, c *gin.Context, stream bool, upstreamKey string) {
+	uReq.Header.Set("Content-Type", "application/json")
+	auth := ""
+	if upstreamKey != "" {
+		auth = "Bearer " + upstreamKey // 真实渠道：用渠道自己的上游 key 鉴权，而不是租户 key
+	} else if a := c.GetHeader("Authorization"); a != "" {
+		auth = a // 无上游 key 的渠道（mock）维持透传
+	}
+	if auth != "" {
+		uReq.Header.Set("Authorization", auth)
+	}
+	if stream {
+		uReq.Header.Set("Accept", "text/event-stream")
+	}
+}
+
+func chatUpstreamBody(req *chatRequest) []byte {
+	if len(req.raw) > 0 {
+		return req.raw
+	}
+	body, _ := json.Marshal(req)
+	return body
+}
+
+var errChatBody = errors.New("invalid chat body")
+
+func parseChatBody(body []byte) (chatRequest, error) {
+	var flex struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+		MaxTokens           int  `json:"max_tokens"`
+		MaxCompletionTokens int  `json:"max_completion_tokens"`
+		Stream              bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &flex); err != nil {
+		return chatRequest{}, err
+	}
+	req := chatRequest{
+		Model:     canonicalModel(flex.Model),
+		Stream:    flex.Stream,
+		MaxTokens: flex.MaxTokens,
+		raw:       adaptChatBody(body),
+	}
+	if req.Model == "" || len(flex.Messages) == 0 {
+		return chatRequest{}, errChatBody
+	}
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = flex.MaxCompletionTokens
+	}
+	for _, m := range flex.Messages {
+		if m.Role == "" {
+			return chatRequest{}, errChatBody
+		}
+		req.Messages = append(req.Messages, chatMessage{Role: m.Role, Content: messageText(m.Content)})
+	}
+	return req, nil
+}
+
+func messageText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) == nil {
+		var b strings.Builder
+		for _, part := range parts {
+			b.WriteString(part.Text)
+		}
+		return b.String()
+	}
+	return ""
+}
+
+func estimateMessages(req *chatRequest) int64 {
+	parts := make([]string, 0, len(req.Messages)*2)
+	for _, m := range req.Messages {
+		parts = append(parts, m.Role, m.Content)
+	}
+	// New API 的对话开销：每条消息 3，整次请求再加 3。
+	n := tokens.Count(req.Model, strings.Join(parts, "\n")) + len(req.Messages)*3 + 3
+	if n < 1 {
+		return 1
+	}
+	return int64(n)
+}
+
+// reverseWithBackground 独立 ctx 退款：上游失败时退回预扣。若退款本身失败，
+// 交 M4 对账冲正——所以这里只记日志，不让退款错误影响已发生的失败响应。
+func reverseWithBackground(b billingAPI, log *slog.Logger, requestID string, billID int64, reason string) {
+	ctx, cancel := client.BackgroundCtx(10 * time.Second)
+	defer cancel()
+	resp, err := b.Reverse(ctx, &billingv1.ReverseRequest{RequestId: requestID, BillId: billID, Reason: reason})
+	if err != nil {
+		log.Error("reverse failed", "request_id", requestID, "reason", reason, "err", err)
+		return
+	}
+	log.Info("reversed", "request_id", requestID, "reversed", resp.Reversed, "refund", resp.RefundQuota, "reason", reason)
+}
+
+func adaptChatBody(body []byte) []byte {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(body, &raw) != nil {
+		return append([]byte(nil), body...)
+	}
+	msgsRaw, ok := raw["messages"]
+	if !ok {
+		return append([]byte(nil), body...)
+	}
+	var msgs []map[string]json.RawMessage
+	if json.Unmarshal(msgsRaw, &msgs) != nil {
+		return append([]byte(nil), body...)
+	}
+	changed := false
+	for i, msg := range msgs {
+		if jsonString(msg["role"]) != "developer" {
+			continue
+		}
+		encoded, err := json.Marshal("system")
+		if err != nil {
+			continue
+		}
+		msgs[i]["role"] = encoded
+		changed = true
+	}
+	if !changed {
+		return append([]byte(nil), body...)
+	}
+	encoded, err := json.Marshal(msgs)
+	if err != nil {
+		return append([]byte(nil), body...)
+	}
+	raw["messages"] = encoded
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return append([]byte(nil), body...)
+	}
+	return out
+}
+
+func readLimitedBody(rc io.ReadCloser) []byte {
+	if rc == nil {
+		return nil
+	}
+	done := make(chan []byte, 1)
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(rc, 64<<10))
+		done <- b
+	}()
+	select {
+	case b := <-done:
+		rc.Close()
+		return b
+	case <-time.After(2 * time.Second):
+		rc.Close()
+		return nil
+	}
+}
+
+func writeUpstreamBody(c *gin.Context, status int, body []byte) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		abort(c, status, http.StatusText(status))
+		return
+	}
+	ctype := "text/plain; charset=utf-8"
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		ctype = "application/json"
+	}
+	c.Data(status, ctype, body)
+}
+
+func abort(c *gin.Context, code int, msg string) {
+	kind := "api_error"
+	switch code {
+	case http.StatusBadRequest:
+		kind = "invalid_request_error"
+	case http.StatusUnauthorized:
+		kind = "authentication_error"
+	case http.StatusPaymentRequired:
+		kind = "insufficient_quota"
+	case http.StatusTooManyRequests:
+		kind = "rate_limit_error"
+	}
+	c.AbortWithStatusJSON(code, gin.H{"error": gin.H{"message": msg, "type": kind}})
+}
+
+func newChatUpstreamRequest(ctx context.Context, base string, body []byte) (*http.Request, error) {
+	endpoint, err := upstream.ChatURL(base)
+	if err != nil {
+		return nil, err
+	}
+	return http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+}

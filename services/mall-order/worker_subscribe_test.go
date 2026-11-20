@@ -17,7 +17,7 @@
 //  2. 下单守卫（TestCreateCartOrder_SubscriptionWithoutPlanRejected）：
 //     订阅商品未关联 plan（ref_plan_id=0）→ 建单拒绝（MALL_30007）；
 //  3. 真 billing 集成（TestWorker_SubscribeRealBilling_MixedOrderFulfills）：
-//     spawn ai-gateway cmd/billing 子进程（dev MySQL ai_gateway + dev Redis），
+//     spawn services/billing/cmd/billing 子进程（dev MySQL ai_gateway + dev Redis），
 //     混合单 general+subscription 各自履约 done、订单 fulfilled、订阅记录
 //     active、0 元锚（ref_type="mall-sub"）恰 1 条、余额三口径不动
 //     （激活不接真钱）、断电重放 no-op 不重复变更。
@@ -38,8 +38,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // seedSubscriptionGoods 校验商品 301 种子就绪（上架 + 关联在售定期套餐），

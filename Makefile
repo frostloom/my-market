@@ -21,11 +21,16 @@ BUF := $(BIN_DIR)/buf
 PROTOC_GEN_GO := $(BIN_DIR)/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(BIN_DIR)/protoc-gen-go-grpc
 
-.PHONY: proto proto-tools
+.PHONY: proto proto-billing proto-tools
 
 # 生成 mall v1 的 Go 代码（消息 + gRPC stub）
 proto: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC)
 	PATH="$(BIN_DIR):$$PATH" $(BUF) generate proto/mall/v1
+
+# 生成 billing v1 的 Go 代码（R2.7 起生成配置在 pkg/proto/buf.gen.yaml，
+# 原 services/ai-gateway/Makefile + buf.gen.yaml 并入此处）
+proto-billing: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC)
+	cd pkg/proto && PATH="$(BIN_DIR):$$PATH" $(BUF) generate .
 
 # 显式安装/升级全部生成工具
 proto-tools: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC)

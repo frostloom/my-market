@@ -107,13 +107,13 @@ AI 售卖沿用 gateway 现状，**只有两种模式**：
 | 商品域 | mall-goods（新） | 新建 | 商品/品类/分页/普通商品库存 |
 | 交易域 | mall-order（新）、mall-bff（新） | 新建 | 购物车、订单状态机、支付回调、outbox 履约、REST 入口与会话适配 |
 | 营销域 | seckill（新） | 新建 | 秒杀活动、库存预热、Lua 扣减、削峰、回补、对账 |
-| 计费域 | billing（已有） | **加法改造** | 新增 `Credit` 与 `ActivateSubscription` 两个幂等 gRPC；内核语义不动 |
+| 计费域 | billing（已有；reconciler/event-consumer 为**其域内后台工人**，三进程一份 internal，ADR-011） | **加法改造** | 新增 `Credit` 与 `ActivateSubscription` 两个幂等 gRPC；内核语义不动；对账/消费工人同域治理（`ai_gateway` 库唯一 owner=billing） |
 | AI 网关域 | gateway、router、mock-provider（已有） | 不动 | 推理数据面 |
 | 智能域 | agent（已有） | 不动 | AI 客服 |
-| 对账域 | reconciler、event-consumer（已有）+ 履约 worker、秒杀消费者、对账 job（新） | 扩展 | 最终一致兜底 |
-| 客户端域 | 商城 Web 双前端（新，web/）、ai-gateway Web（已有） | 新建/保留 | 用户端商城 + 管理端控制台（R6）/ 计费侧控制台 |
+| 对账域 | billing 域工人（reconciler/event-consumer，见上）+ 履约 worker、秒杀消费者、对账 job（新，market 库侧） | 扩展 | 最终一致兜底 |
+| 客户端域 | 商城 Web 双前端（新，web/）、gateway Web（已有，services/gateway/web） | 新建/保留 | 用户端商城 + 管理端控制台（R6）/ 计费侧控制台 |
 
-**架构原则**：① 余额/入账唯一权威在 billing（任何加钱动作只走 Credit，ref 幂等）；② 订单系统按业务域隔离：billing 内 RechargeOrder（充值，同步 MySQL 事务）与推理 bills（Redis 实时权威 + 批量落账）各自既有机制**均不动**；mall_order 为 market 库的独立订单体系（支付同步事务 + outbox 履约），秒杀走 Kafka 异步落库——分离理由是**业务域与演进隔离**，非持久化机制差异（v0.3 修正）；③ 对外仅 mall-bff 与 gateway 两个数据面入口；④ 同构模式复用（预扣/幂等/对账三模式多处落点）；⑤ 跨服务履约一致性用**轻量事务性发件箱**：支付置 paid 的同一事务写 fulfillment_tasks → 后台 worker 执行 Credit/ActivateSubscription（幂等可重试）→ 全行 done 才 fulfilled → 对账 job 扫滞留兜底；⑥ mall 侧稳定性三板斧 = 超时 + 重试 + 对账，不新增服务间熔断框架（上游熔断 router 已有）。
+**架构原则**：① 余额/入账唯一权威在 billing（任何加钱动作只走 Credit，ref 幂等）；② 订单系统按业务域隔离：billing 内 RechargeOrder（充值，同步 MySQL 事务）与推理 bills（Redis 实时权威 + 批量落账）各自既有机制**均不动**；mall_order 为 market 库的独立订单体系（支付同步事务 + outbox 履约），秒杀走 Kafka 异步落库——分离理由是**业务域与演进隔离**，非持久化机制差异（v0.3 修正）；③ 对外仅 mall-bff 与 gateway 两个数据面入口；④ 同构模式复用（预扣/幂等/对账三模式多处落点）；⑤ 跨服务履约一致性用**轻量事务性发件箱**：支付置 paid 的同一事务写 fulfillment_tasks → 后台 worker 执行 Credit/ActivateSubscription（幂等可重试）→ 全行 done 才 fulfilled → 对账 job 扫滞留兜底；⑥ mall 侧稳定性三板斧 = 超时 + 重试 + 对账，不新增服务间熔断框架（上游熔断 router 已有）；⑦ 服务边界由编译器 internal 规则 + importguard 白名单门禁双层强制（R2.7 拆分后全仓单模块，ADR-011）。
 
 ---
 
@@ -292,7 +292,7 @@ fulfillment_tasks(id, order_no, line_no, type[ship|credit|subscribe],
 
 ## 11. 仓库布局与产物位置约定（工作纪律）
 
-**所有产物各归其位，禁止随手散放。** 目标仓库结构：
+**所有产物各归其位，禁止随手散放。** 目标仓库结构（R2.7 服务拆分后，ADR-011）：
 
 ```
 my-market/
@@ -304,33 +304,43 @@ my-market/
 │   │   ├── db-schema.sql      # market 库 DDL
 │   │   ├── sequences.md       # 核心时序（含错误分支）
 │   │   ├── acceptance.md      # 各里程碑可执行验收清单
-│   │   └── adr/               # 架构决策记录（每条一页）
-│   └── plans/                 # 阶段任务拆解（superpowers 任务清单）
-├── services/
-│   ├── ai-gateway/            # 整仓迁入（R2.6 结构归位到 services/），模块路径不变（eval/ 已于 R2.6-T2 提为顶层 eval/）
-│   └── mall-bff / mall-goods / mall-order / seckill   # 商城侧（根模块）
+│   │   └── adr/               # 架构决策记录（每条一页；ADR-011=服务拆分与边界）
+│   ├── plans/                 # 阶段任务拆解（superpowers 任务清单）
+│   └── ai-gateway/            # 旧仓冻结历史文档（置顶声明死链债，不随活码更新）
+├── services/                  # 全量服务树（单模块；边界=编译器 internal + importguard 白名单）
+│   ├── mall-bff / mall-goods / mall-order   # 商城侧
+│   ├── mall-gen               # mall gRPC 生成物（make proto 输出，勿手改）
+│   ├── seckill                # 秒杀（R4）
+│   ├── gateway                # AI 网关数据面（web/ 前端源随树）
+│   ├── billing                # 计费权威：cmd/{billing,reconciler,event-consumer} 三域工人 + store + admin + scripts/schema.sql
+│   ├── router / agent / mock-provider       # 路由 / 智能客服 / 假上游
+│   └── （服务树内 tools/ 子目录：agent/eval、gateway/autoroute-bench、billing/loadtest 等）
 ├── eval/                      # 统一评测资产（顶层，R2.6-T2）：eval/ai-gateway/ 存量 + 后续 loadtest(R4)/e2e(R6) 按域分目录，规约见 eval/README.md
+├── tools/                     # 评测/基准工具 + internal 基建 + verify/（冻结证据校验器）+ m1/m4 + legacy-ops/
 ├── web/                       # 商城前端工程（Vue3+Vite+TS 双入口 mall-user/mall-admin，R6；构建产物 go:embed 进 mall-bff）
 ├── proto/                     # 商城侧 .proto（含 Credit/ActivateSubscription 扩展）
-├── pkg/                       # 商城侧公共库（mallerr/mallpage 等）
+├── pkg/                       # 共享库：商城侧 mallerr/mallpage；AI 侧 config/logger/…/controlplane；proto/billing/v1=商城唯一 AI import 面；importguard=边界门禁
 ├── deploy/
 │   ├── compose/               # 开发期编排（分 profile）
+│   ├── docker/                # 双 Dockerfile（mall-service / go-service，context=仓库根）
 │   └── k8s/                   # R3 起的 manifests/Helm
-├── scripts/                   # 构建/造数/压测脚本
-└── go.work                    # 双模块工作区
+├── scripts/                   # 构建/造数/冒烟脚本
+└── go.mod                     # 单模块 github.com/frostloom/my-market（R2.7 起无 go.work）
 ```
 
-根模块 `github.com/frostloom/my-market`（services/pkg/proto）+ 嵌套模块 `github.com/frostloom/ai-gateway`（import 路径零改动）。
+全仓单模块 `github.com/frostloom/my-market`（R2.7 合并原嵌套模块 `github.com/frostloom/ai-gateway`，import 路径已全量改写）；跨服务边界由编译器 internal 规则 + `pkg/importguard` 白名单门禁双层强制（ADR-011）。
 
 **工作流程约定（SDD）**：PRD（本文档）→ 五份规格（docs/spec/）→ 阶段任务拆解（docs/plans/，superpowers 风格）→ **用户确认后才执行**。规格或计划变更先改文档再改代码。
 
 ---
 
-## 12. ai-gateway 迁移方案（已定）
+## 12. ai-gateway 迁移方案（已定；R2.7 拆分取代其双模块结论）
 
-- **整仓迁入** `my-market/services/ai-gateway/`（R0 迁入根下，R2.6 结构归位至 services/）：全部源码、web/、docs/、scripts/、deploy/、**eval/ 全套（220M，含 langfuse 相关，评测在新仓继续）**；
+> **R2.7 更新（2026-11-20）**：本节记录 R0 迁移决策（历史事实，保留原文）。其中「模块路径不变 / 双模块」结论已被 [ADR-011](spec/adr/ADR-011-服务拆分与编译器强制边界.md) 取代——独立模块已合并，全部 import 改写为 `github.com/frostloom/my-market/...`，服务平铺 `services/` 十目录。
+
+- **整仓迁入** `my-market/`（R0 迁入根下，R2.6 结构归位至 services/，R2.7 拆分为十服务树）：全部源码、web/、docs/（现 docs/ai-gateway/ 冻结留档）、scripts/、deploy/、**eval/ 全套（220M，含 langfuse 相关，评测在新仓继续）**；
 - **不迁**：`.git`（2.6G 历史留在旧仓）、logs/、.gocache/、worktrees/ 等运行产物；
-- Go 模块路径 `github.com/frostloom/ai-gateway` 不变——代码零改动即编译；
+- Go 模块路径 `github.com/frostloom/ai-gateway` 迁入时不变（R0-R2.6）；R2.7 起合并进根模块（ADR-011）；
 - 旧 GitHub 仓**归档只读**（历史凭证），README 顶部指向 my-market；此后 gateway 的开发都在新仓目录内进行；
 - 两仓都公开，迁入前密钥/`.env` 脱敏复查。
 
