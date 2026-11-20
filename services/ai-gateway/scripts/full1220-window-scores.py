@@ -20,7 +20,12 @@ import json
 import math
 import re
 import os
-import fcntl
+try:
+    # POSIX 发布注册表联锁（flock）。Windows 无 fcntl：置 None 后，任何真实注册表
+    # 调用会在 flock 处显式失败关闭（AttributeError），纯计划/投影/校验路径不受影响。
+    import fcntl
+except ImportError:
+    fcntl = None
 import base64
 import argparse
 import importlib.util

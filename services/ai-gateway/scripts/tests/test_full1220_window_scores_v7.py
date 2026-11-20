@@ -1,6 +1,7 @@
 """Portable v7 score compatibility; no real Go, credentials, network or registry."""
 import sys
 sys.dont_write_bytecode = True
+import os
 import copy
 import inspect
 import json
@@ -196,6 +197,8 @@ class V7FixedRunnerTests(unittest.TestCase):
                     else:
                         with self.assertRaises(ValueError):run()
 
+# POSIX 专用发布注册表（见主测试文件 PublicationTests 说明）。
+@unittest.skipIf(os.name == 'nt', 'publication registry is POSIX-only (fcntl.flock/O_DIRECTORY/geteuid)')
 class V7PublicationBoundaryTests(unittest.TestCase):
     setUpClass=classmethod(old.PublicationTests.setUpClass.__func__)
     setUp=old.PublicationTests.setUp

@@ -2,6 +2,7 @@
 import sys
 sys.dont_write_bytecode = True
 import inspect
+import os
 import copy
 import hashlib
 import importlib.util
@@ -813,6 +814,8 @@ class ContentProjectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.adapter.validate_window_traces(plan,proof,self.client(self.plan(),proof))
 
 
+# 发布注册表为 POSIX 专用子系统（fcntl.flock / O_DIRECTORY / geteuid），Windows 无法真实执行，整类按平台跳过（fail-closed 语义不变）。
+@unittest.skipIf(os.name == 'nt', 'publication registry is POSIX-only (fcntl.flock/O_DIRECTORY/geteuid)')
 class PublicationTests(unittest.TestCase):
     setUpClass = classmethod(ContentProjectionTests.setUpClass.__func__)
     api = ContentProjectionTests.api
