@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [vue()],
   base: '/',
   build: {
-    outDir: resolve(__dirname, '../internal/gateway/web/dist'),
+    outDir: resolve(__dirname, '../internal/web/dist'),
     emptyOutDir: true,
     rollupOptions: {
       input: {

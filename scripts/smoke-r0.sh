@@ -5,7 +5,7 @@
 # 步骤：
 #   1) 全 healthz（billing:9103 / router:9102 / agent:9105）+ gateway:18080 首页 200
 #      + billing gRPC :9101 / gateway :18080 TCP 可达
-#   2) 幂等造数（等价 SQL，复用 services/ai-gateway/scripts/schema.sql 的 seed 口径）：
+#   2) 幂等造数（等价 SQL，复用 services/billing/scripts/schema.sql 的 seed 口径）：
 #      - providers mock-a/mock-b 重指到容器服务名 http://mock-provider:9201
 #        （schema.sql 种子写的是宿主回环 127.0.0.1:9201/9202，容器网络内不通）
 #        并清零熔断计数（fail_count/consecutive_fail/cooldown_until）

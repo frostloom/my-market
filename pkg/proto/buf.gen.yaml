@@ -1,0 +1,14 @@
+version: v2
+# billing proto 生成配置（纯 Go 工具链：buf 自带编译器，无需 protoc 二进制）。
+# 插件安装：仓根 `make proto-tools`（装进 `go env GOPATH`/bin）。
+# 用法：仓根 `make proto-billing`（等价于在本目录执行 buf generate .）
+# 输出（source_relative）：pkg/proto/billing/v1/{billing.pb.go,billing_grpc.pb.go}
+# （生成物入库，构建不依赖本目标。原 services/ai-gateway/{Makefile,buf.gen.yaml}
+#   随 R2.7 服务拆分并入此处与仓根 Makefile。）
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: .
+    opt: paths=source_relative
