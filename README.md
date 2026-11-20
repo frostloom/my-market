@@ -67,7 +67,7 @@ services/                    全量服务树（单模块，R2.7 拆分；边界=
   router                    上游加权路由 + 熔断 + AutoBan
   agent                     AI 智能客服（执行层不信任 LLM；tools/eval、tools/knowledge-manifest）
   mock-provider             假上游（故障注入）
-pkg/                         共享库：商城侧 mallerr/mallpage；AI 侧 config/logger/redisx/tokens/quota/kafka/trace/xid/jev/observability/supportconfig/upstream/gatewayclient/controlplane
+pkg/                         共享库：商城侧 mallerr/mallpage；AI 侧 config/logger/metrics/redisx/tokens/quota/kafka/trace/xid/jev/observability/supportconfig/upstream/gatewayclient/controlplane
   importguard               跨服务 import 边界白名单门禁（编译器管 internal，门禁管公开面）
   proto/billing/v1          billing gRPC 契约（mall 对 AI 域唯一合法 import 面）
 tools/                       评测/基准工具 10 个 + internal/{taskbench,localpaired} + verify/（冻结证据校验器）+ m1/m4 + legacy-ops/
