@@ -40,7 +40,7 @@ services/gateway/web/.probe/
 # 评测资产运行产物（R2.6-T2 起 eval 资产在顶层 eval/ai-gateway/，数据集入库、可再生产物忽略）
 # Companion raw JSON remains local; byte-identical gzip and SHA manifests are tracked.
 eval/ai-gateway/behavior-review/v*/*.behavior.json
-# 评测报告（由 services/ai-gateway cmd/eval 等工具重新生成）
+# 评测报告（由 tools/eval 等评测工具重新生成）
 eval/ai-gateway/reports/
 __pycache__/
 # 2026-11 线下压测原始运行数据（结论在 docs，原始目录只留本地）
