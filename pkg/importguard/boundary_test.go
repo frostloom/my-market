@@ -18,7 +18,7 @@ import (
 )
 
 // 允许的 ai-gateway import 前缀（唯一暴露面）。
-const allowedPrefix = "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
+const allowedPrefix = "github.com/frostloom/my-market/pkg/proto/billing/v1"
 
 func TestImportBoundary_OnlyPkgProto(t *testing.T) {
 	// 测试 cwd = 本包目录，仓库根在 ../..。

@@ -19,6 +19,18 @@ node_modules/
 # 本地 compose 覆盖配置
 deploy/compose/.env
 
+# R2.7 起 langfuse 部署迁根 deploy/langfuse/：密钥与运行期数据只留本地
+# （承接 services/ai-gateway/.gitignore 的同名规则；.env* 已被上方规则覆盖）
+deploy/langfuse/data/
+deploy/langfuse/.local-login.txt
+
+# gateway 前端本地产物（原 services/ai-gateway/web/ 规则随拆分重锚）
+services/gateway/web/.npm-cache/
+services/gateway/web/preview/
+services/gateway/web/.probe/
+.dsh-vision-toolkit/
+.hallmark/
+
 # 构建产物（勿入库）
 /mall-bff
 /mall-goods

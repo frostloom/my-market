@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // 控制面契约常量（与 ai-gateway/internal/pkg/controlplane 同值）。

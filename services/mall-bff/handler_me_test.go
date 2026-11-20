@@ -35,8 +35,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // ---------------------------------------------------------------------------

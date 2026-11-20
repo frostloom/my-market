@@ -6,13 +6,13 @@
 //     函数桩，断言 ref 组装 / 金额 / 成功后行 done 与订单 fulfilled，以及
 //     created=false 重放（no-op）也按履约成功收口；
 //  2. 真 billing 集成（TestWorker_CreditCrashReplay_ExactlyOneTopup）：spawn
-//     ai-gateway cmd/billing 真实子进程（dev MySQL ai_gateway + dev Redis 6381，
+//     services/billing/cmd/billing 真实子进程（dev MySQL ai_gateway + dev Redis 6381，
 //     X-Control-Token 鉴权），跑两轮 RunFulfillmentOnce 模拟重启重放，
 //     断言 billing topups 该 ref 恰 1 条（uk_ref 幂等提交点）、第二轮
 //     CreditReply.created=false 仍收敛、订单 fulfilled。
 //
 // mall 侧 import 边界（pkg/importguard）：只允许 import billing proto 契约面，
-// 因此"真 billing"以子进程方式拉起（不能 import ai-gateway internal 包）。
+// 因此"真 billing"以子进程方式拉起（不能跨树 import 服务 internal 包（R2.7 起 Go internal 规则））。
 // 隔离与还原：mall 行按 cleanupTenant 还原；billing 侧每测试专属租户
 // （显式高段 id，与 mall 测试租户段约定一致），t.Cleanup 删 topups/tenants +
 // Redis 余额/锁栅栏键。禁止并发跑基础设施套件（T1 警示）。
@@ -40,7 +40,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -343,10 +343,10 @@ func TestWorker_CreditFailureBackoffs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 真 billing 集成环境：spawn ai-gateway cmd/billing 子进程（dev MySQL ai_gateway
+// 真 billing 集成环境：spawn services/billing/cmd/billing 子进程（dev MySQL ai_gateway
 // + dev Redis 6381，X-Control-Token 鉴权；BILLING_LEDGER_BATCH_SECONDS=0 保证
-// Credit/Refund 同步落 MySQL，断言立即可见）。import 边界不允许 import
-// ai-gateway internal 包，故走子进程 + 直连 ai_gateway 库做播种/断言/清理。
+// Credit/Refund 同步落 MySQL，断言立即可见）。R2.7 起单模块：服务 internal 包
+// 仍不可跨树 import（Go internal 规则），故走子进程 + 直连 ai_gateway 库做播种/断言/清理。
 
 const (
 	billingTestRedisAddr = "127.0.0.1:6381"
@@ -403,19 +403,19 @@ func tailStderr(buf *bytes.Buffer) string {
 	return s
 }
 
-// buildBillingBinary 构建 ai-gateway cmd/billing（go build 缓存热身后 <1s）。
+// buildBillingBinary 构建 services/billing/cmd/billing（go build 缓存热身后 <1s）。
 func buildBillingBinary(t *testing.T) string {
 	t.Helper()
-	aiDir, err := filepath.Abs(filepath.Join("..", "..", "services", "ai-gateway"))
+	billingDir, err := filepath.Abs(filepath.Join("..", "..", "services", "billing"))
 	if err != nil {
-		t.Fatalf("resolve ai-gateway dir: %v", err)
+		t.Fatalf("resolve billing dir: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(aiDir, "go.mod")); err != nil {
-		t.Skipf("ai-gateway 模块不在位（%s），跳过真 billing 集成", aiDir)
+	if _, err := os.Stat(filepath.Join(billingDir, "cmd", "billing")); err != nil {
+		t.Skipf("billing 服务树不在位（%s），跳过真 billing 集成", billingDir)
 	}
 	bin := filepath.Join(t.TempDir(), "billing")
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/billing")
-	cmd.Dir = aiDir
+	cmd.Dir = billingDir
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("构建 billing 失败: %v\n%s", err, out)

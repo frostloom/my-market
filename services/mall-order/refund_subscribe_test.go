@@ -6,7 +6,7 @@
 // 当期权益保留至期满——mall_order_items 无行级退订列，退款证据与 credit 行
 // 同口径落 billing，零 schema 改动）。
 //
-// TestRefund_Subscription_CancelsNotRefunds 连真 billing（spawn ai-gateway
+// TestRefund_Subscription_CancelsNotRefunds 连真 billing（spawn billing 服务
 // cmd/billing 子进程，见 worker_credit_test.go harness）：
 //  1. 混合单（general+subscription）fulfilled 退款 → 实退额=general 行金额
 //     （订阅行排除）、订阅退订（auto_renew=0、当期保留 entitled）、余额三口径

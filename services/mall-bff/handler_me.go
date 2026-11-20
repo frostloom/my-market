@@ -33,8 +33,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // 控制面契约常量（与 mall-order/billing_client.go、ai-gateway controlplane 同值）。

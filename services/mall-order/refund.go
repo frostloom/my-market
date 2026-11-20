@@ -128,8 +128,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
 	"github.com/frostloom/my-market/pkg/mallerr"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // errOrderAlreadyRefunded 幂等哨兵：订单已 refunded（重复退款 no-op）。

@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	billingv1 "github.com/frostloom/ai-gateway/pkg/proto/billing/v1"
+	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
 // stubBillingServer 捕获入站 metadata 的 billing 服务桩。
@@ -25,7 +25,7 @@ type stubBillingServer struct {
 	billingv1.UnimplementedBillingServiceServer
 
 	mu      sync.Mutex
-	tokens  []string    // 每次 Credit/Refund 调用捕获的 x-control-token
+	tokens  []string // 每次 Credit/Refund 调用捕获的 x-control-token
 	credits []*billingv1.CreditRequest
 	refunds []*billingv1.RefundRequest
 }
