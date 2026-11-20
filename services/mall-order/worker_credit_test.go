@@ -11,8 +11,9 @@
 //     断言 billing topups 该 ref 恰 1 条（uk_ref 幂等提交点）、第二轮
 //     CreditReply.created=false 仍收敛、订单 fulfilled。
 //
-// mall 侧 import 边界（pkg/importguard）：只允许 import billing proto 契约面，
-// 因此"真 billing"以子进程方式拉起（不能跨树 import 服务 internal 包（R2.7 起 Go internal 规则））。
+// mall 侧 import 边界（R2.7 白名单门禁 pkg/importguard）：mall 对 AI 域只允许
+// import billing proto 契约面，因此"真 billing"以子进程方式拉起（越树 import
+// services/billing/** 被门禁拒绝，服务 internal 另被 Go 编译器拒绝）。
 // 隔离与还原：mall 行按 cleanupTenant 还原；billing 侧每测试专属租户
 // （显式高段 id，与 mall 测试租户段约定一致），t.Cleanup 删 topups/tenants +
 // Redis 余额/锁栅栏键。禁止并发跑基础设施套件（T1 警示）。

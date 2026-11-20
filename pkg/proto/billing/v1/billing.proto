@@ -10,6 +10,11 @@ syntax = "proto3";
 
 package billing.v1;
 
+// 勿改（descriptor 字节稳定）：go_package 保留 R2.7 服务拆分前的旧模块路径
+// github.com/frostloom/ai-gateway/...——billing.pb.go 的 rawDesc 按字节记录该
+// 字符串，改动并重新生成 = descriptor 字节漂移（行为面连带变化）。
+// 生成物物理位置已是 pkg/proto/billing/v1/（R2.7 树迁），编译与 import 不受
+// 此逻辑路径影响；待本契约首次真实演进时再一并裁定是否随迁。
 option go_package = "github.com/frostloom/ai-gateway/pkg/proto/billing/v1;billingv1";
 
 // BillingService 计费控制面。除 GetBalance/ValidateAPIKey/RebuildBalance 外全部幂等。

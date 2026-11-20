@@ -4,8 +4,8 @@
 //  1. billing gRPC GetBalance（Redis 投影，账本兜底自愈）——薄拨号
 //     DialBilling（BILLING_ADDR 默认 127.0.0.1:9101），每请求出站注入
 //     X-Control-Token metadata（模式与 mall-order/billing_client.go 同源；
-//     ai-gateway internal/pkg/controlplane 不可跨服务 import，键名以本文件
-//     常量落契约，compose 双侧注入同名 CONTROL_PLANE_TOKEN）；
+//     pkg/controlplane 的常量虽对 mall 开放，门禁只放行 billing proto 契约面，
+//     键名以本文件常量落契约，compose 双侧注入同名 CONTROL_PLANE_TOKEN）；
 //  2. billing admin HTTP GET /admin/topups?tenant_id=（BILLING_ADMIN_ADDR
 //     默认 http://127.0.0.1:9103 + X-Control-Token 头）——该端点固定回 50 条
 //     （limit 参数未支持），客户端截断到最近 10 条。
@@ -37,7 +37,7 @@ import (
 	billingv1 "github.com/frostloom/my-market/pkg/proto/billing/v1"
 )
 
-// 控制面契约常量（与 mall-order/billing_client.go、ai-gateway controlplane 同值）。
+// 控制面契约常量（与 mall-order/billing_client.go、billing 侧 pkg/controlplane 同值）。
 const (
 	// billingMetadataKey X-Control-Token 的 gRPC metadata 键（小写）。
 	billingMetadataKey = "x-control-token"
@@ -67,7 +67,7 @@ type BillingClient interface {
 var _ BillingClient = billingv1.NewBillingServiceClient(nil)
 
 // tokenUnaryClient 出站一元拦截器：每请求注入 X-Control-Token metadata
-// （ai-gateway controlplane.UnaryClient 同款语义；mall 侧自持实现）。
+// （pkg/controlplane.UnaryClient 同款语义；mall 侧自持实现）。
 func tokenUnaryClient(secret string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any,
 		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
