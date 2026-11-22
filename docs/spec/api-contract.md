@@ -38,7 +38,7 @@
 | 操作 | 机制 |
 |---|---|
 | 下单 | `Idempotency-Key` 头必填；作用域 `(tenant_id, key)`；同 key 同 payload 返回原单（201，与首次一致——重放响应与首次创建同形），不同 payload 拒绝 MALL_30003 |
-| 支付回调 | Provider 回调天然重试，`payment_records` + 订单状态条件更新幂等；重复回调返回当前状态 200 |
+| 支付回调 | Provider 回调天然重试，`payment_records` + 订单状态条件更新幂等（`uk_order_provider_trade` 组合唯一键 DB 兜底）；重复回调返回当前状态 200 |
 | Credit/冲退 | billing `uk_ref(ref_type, ref_id)` 唯一索引，重复 no-op |
 | 秒杀抢购 | `(activity_id, tenant_id)` 唯一索引 |
 
@@ -134,7 +134,7 @@
 错误：MALL_10005/20001/20003/30003/30007。
 
 ### POST /orders/{no}/pay
-触发 Provider 支付（mock：内部即刻回调）。200 `{"status":"paid|created","payment":{...}}`。幂等：已支付返回当前状态（MALL_30002 仅用于已关闭/已退）。
+触发 Provider 支付（mock：内部即刻回调）。200 `{"status":"paid|created","payment":{...}}`。幂等：已支付返回当前状态（MALL_30002 仅用于已关闭/已退）；订单存在在途支付单（`payment_records` status=created，PRD §5.2）时复用同一 `trade_no`，不重复向渠道建单——并发双击不会拉起两笔支付。
 
 ### POST /payments/callback（无需会话鉴权，走验签）
 Provider 异步回调入口（mock/stripe test 均打到此处）。成功 200 `{"order_no":"..","status":"paid"}`（重复回调幂等返回当前状态）。验签失败 MALL_30005。

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	mysqldrv "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
@@ -103,22 +104,10 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 			First(&exist).Error
 		switch {
 		case err == nil:
-			// 合并：同商品累加 qty，封顶 99（撞 chk_qty 前先拒绝，给出契约码）；
-			// 订阅商品合并后仍须恰 1——既有行存在时任何累加都越限购，拒绝。
-			if int(exist.Qty)+qty > cartQtyMax {
-				return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
-					"商品数量超限: 合并后 %d（≤99）", int(exist.Qty)+qty)
-			}
-			if g.Type == typeSubscription && int(exist.Qty)+qty != 1 {
-				return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
-					"订阅商品限购 1 件: %d（合并后 %d）", goodsID, int(exist.Qty)+qty)
-			}
-			if err := tx.Model(&cartRow{}).Where("id = ?", exist.ID).
-				Updates(map[string]any{"qty": int(exist.Qty) + qty, "updated_at": now}).Error; err != nil {
-				return fmt.Errorf("mall-order: merge cart row: %w", err)
-			}
+			return mergeCartRow(tx, &exist, g.Type == typeSubscription, goodsID, qty, now)
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			// 新行：20 行上限。
+			// 新行：20 行上限（快照口径；并发加不同商品的理论竞窗只影响
+			// 产品上限、不涉资金不变量，由上限语义兜底）。
 			var n int64
 			if err := tx.Model(&cartRow{}).Where("tenant_id = ?", tenantID).Count(&n).Error; err != nil {
 				return fmt.Errorf("mall-order: count cart rows: %w", err)
@@ -127,14 +116,38 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 				return mallerr.E(mallerr.CodeCartRowsExceeded, false,
 					"购物车行数超上限（%d）", cartMaxRows)
 			}
-			if err := tx.Create(&cartRow{
-				TenantID:  tenantID,
-				GoodsID:   goodsID,
-				Qty:       int32(qty),
-				CreatedAt: now,
-				UpdatedAt: now,
-			}).Error; err != nil {
-				return fmt.Errorf("mall-order: insert cart row: %w", err)
+			if g.Type == typeSubscription {
+				// 订阅商品限购 1：并发同商品加购必须显式拒绝（合并即违反
+				// 限购不变量），故用裸 INSERT + 撞键锁下重读分流，不走
+				// 会静默合并的 upsert。
+				if err := tx.Create(&cartRow{
+					TenantID:  tenantID,
+					GoodsID:   goodsID,
+					Qty:       int32(qty),
+					CreatedAt: now,
+					UpdatedAt: now,
+				}).Error; err != nil {
+					var me *mysqldrv.MySQLError
+					if errors.As(err, &me) && me.Number == mysqlErrDupEntry {
+						return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+							"订阅商品限购 1 件: %d（并发加购已存在）", goodsID)
+					}
+					return fmt.Errorf("mall-order: insert cart row: %w", err)
+				}
+				return nil
+			}
+			// 普通商品：单语句 upsert——并发首加同商品时由 MySQL 在一条
+			// 语句内原子合并（qty 累加、LEAST 封顶 99 保 chk_qty 不变式），
+			// 不用「INSERT + 1062 重读」两步（多路并发下会互相等锁触发 1213），
+			// 也不会把 1062 原文透给客户端（契约 §0.2 人话口径）。
+			// VALUES() 在 MySQL 8.0.20+ 有弃用告警但全 8.0.x 可用；AS new
+			// 别名语法在 <8.0.20 硬失败——栈为 mysql:8.0 浮动 tag，取兼容优先。
+			if err := tx.Exec(
+				"INSERT INTO cart_items (tenant_id, goods_id, qty, created_at, updated_at) "+
+					"VALUES (?, ?, ?, ?, ?) "+
+					"ON DUPLICATE KEY UPDATE qty = LEAST(qty + VALUES(qty), ?), updated_at = VALUES(updated_at)",
+				tenantID, goodsID, qty, now, now, cartQtyMax).Error; err != nil {
+				return fmt.Errorf("mall-order: upsert cart row: %w", err)
 			}
 		default:
 			return fmt.Errorf("mall-order: load cart row: %w", err)
@@ -145,6 +158,34 @@ func (s *Store) AddCart(ctx context.Context, tenantID uint64, goodsID uint64, qt
 		return nil, err
 	}
 	return s.loadCart(ctx, tenantID)
+}
+
+// mergeCartRow 加购合并：条件原子累加 qty = qty + ?（带 ≤99 守卫）。
+// 读改写式 Updates(快照值+qty) 在并发合并下会丢一次累加，故以当前行值做
+// 条件更新——RowsAffected=0 即合并越限（或行被并发删除，客户端重试即走
+// 新行路径，同码可接受）。订阅商品行 qty 恒 1（三入口同口径保证），既有行
+// 存在时任何累加都越限购，确定性拒绝。
+func mergeCartRow(tx *gorm.DB, exist *cartRow, isSubscription bool, goodsID uint64, qty int, now time.Time) error {
+	if isSubscription {
+		return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+			"订阅商品限购 1 件: %d（合并后 %d）", goodsID, int(exist.Qty)+qty)
+	}
+	if int(exist.Qty)+qty > cartQtyMax {
+		return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+			"商品数量超限: 合并后 %d（≤99）", int(exist.Qty)+qty)
+	}
+	res := tx.Exec(
+		"UPDATE cart_items SET qty = qty + ?, updated_at = ? "+
+			"WHERE id = ? AND qty + ? <= ?",
+		qty, now, exist.ID, qty, cartQtyMax)
+	if res.Error != nil {
+		return fmt.Errorf("mall-order: merge cart row: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return mallerr.E(mallerr.CodeGoodsQtyExceeded, false,
+			"商品数量超限: 合并后超过上限（≤%d）", cartQtyMax)
+	}
+	return nil
 }
 
 // PatchCartQty 改数量（契约 PATCH /cart/items/{id}）；qty=0 等价删除。

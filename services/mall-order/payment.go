@@ -207,12 +207,30 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 			switch {
 			case exist.Status == paymentStatusPaid:
 				return nil
+			case exist.Status == paymentStatusRefunded:
+				// refunded 为流水终态：退款后的迟到 paid 重放不得把流水翻回
+				// paid（订单不动，此处仅防审计污染——状态须与退款事实一致）。
+				return nil
 			case !cb.Paid && exist.Status == paymentStatusFailed:
 				return nil // 重复失败回调
+			case !cb.Paid && exist.Status == paymentStatusCreated:
+				// 失败回调落在在途单上（BeginPayment 已建单、渠道回报失败）：
+				// created→failed——否则死单号永久占用在途位，后续 /pay 只会
+				// 复用一张已死的单，真实渠道下用户无法重新拉起支付。
+				if err := tx.Model(&paymentRecordRow{}).Where("id = ?", exist.ID).
+					Updates(map[string]any{
+						"status":             paymentStatusFailed,
+						"callback_payload":   string(payloadJSON),
+						"signature_verified": sigFlag(cb.SignatureVerified),
+					}).Error; err != nil {
+					return fmt.Errorf("mall-order: void in-flight record %s: %w", cb.OrderNo, err)
+				}
+				return nil
 			case !cb.Paid:
-				return nil // 已 paid 又来失败回调：矛盾回调，以首回调为准
+				return nil // 已 paid 又来失败回调：矛盾回调，以首回调为准（paid 不回退）
 			}
-			// cb.Paid 且旧流水 failed：Provider 重试恢复，下方升级为 paid。
+			// cb.Paid 且旧流水 failed/created：Provider 失败重试恢复 / 在途单
+			// 转正——下方按既有升级路径置 paid。
 		} else if !cb.Paid {
 			// 失败回调（新 trade_no）：仅落 failed 流水，订单停留 created（R0 台账）。
 			rec := paymentRecordRow{
@@ -230,11 +248,31 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 		// 2.5) 金额校验（sequences §1 三分支）：paid 回调金额 ≠ 订单金额 → 拒付——
 		//      落 failed 流水（amount_cent 记回调金额，订单金额补进审计载荷），
 		//      订单停留 created，返回 nil（回调被受理但不置 paid，对 HTTP 回调 200）。
-		//      已有同 trade_no 流水（必为 failed，paid 已被上方幂等分支拦截）：
-		//      错额重放幂等 no-op，不再重复落流水；恢复须以正确金额重发，
-		//      走下方 failed 升级 paid / 新号补 paid 流水的既有路径。
+		//      已有同 trade_no 流水的错额重放（paid 已被上方幂等分支拦截，
+		//      旧流水为 failed/refunded——refunded 已终态 no-op）幂等 no-op；
+		//      旧流水为在途单（created）时降级 failed 并留错额审计——否则死
+		//      单号永久占用在途位，后续 /pay 只会复用一张已死的单。恢复须以
+		//      正确金额重发，走新号建单路径。
+		//      口径注：若渠道以同 trade_no 重发正确金额，走下方 failed→paid
+		//      升级——流水金额与载荷被成功回调覆写（错额痕迹只在换新号路径
+		//      保留；单列审计载荷以「最近一次回调」为准的取舍）。
 		if cb.Paid && cb.AmountCent != row.AmountCent {
 			if hasExisting {
+				if exist.Status == paymentStatusCreated {
+					pj, merr := json.Marshal(mismatchPayload{Callback: cb, OrderAmountCent: row.AmountCent})
+					if merr != nil {
+						pj = payloadJSON // Callback 全为可序列化标量，不可达；防御性回退回调原文
+					}
+					if err := tx.Model(&paymentRecordRow{}).Where("id = ?", exist.ID).
+						Updates(map[string]any{
+							"status":             paymentStatusFailed,
+							"amount_cent":        cb.AmountCent,
+							"callback_payload":   string(pj),
+							"signature_verified": sigFlag(cb.SignatureVerified),
+						}).Error; err != nil {
+						return fmt.Errorf("mall-order: mismatch void in-flight record %s: %w", cb.OrderNo, err)
+					}
+				}
 				return nil
 			}
 			pj, merr := json.Marshal(mismatchPayload{Callback: cb, OrderAmountCent: row.AmountCent})
@@ -298,6 +336,71 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 		}
 		return nil
 	})
+}
+
+// BeginPaymentTx 在途支付单建单/复用事务（PRD §5.2：CreatePayment 写
+// payment_records=created——本方法是其服务端落点，bff 的 /pay 建单步骤调此）。
+//
+// 语义（同订单串行化由订单行锁保证）：
+//   - 订单不存在或非本租户 → MALL_30001（与 GetOrder 同口径，不泄漏存在性）；
+//   - 订单非 created → MALL_30002（关单/支付竞态在锁下复查兜住）；
+//   - 已存在在途单（status=created）→ 复用其 trade_no（reused=true），
+//     调用方沿用该单号、不得再向渠道新建支付——防同订单并发拉起多笔渠道
+//     支付造成双扣款（退款锚点是流水行，多张在途单会失去对应关系）；
+//   - 否则生成 trade_no，落 created 流水（amount_cent 为订单金额快照）。
+func (s *Store) BeginPaymentTx(ctx context.Context, tenantID uint64, orderNo, provider string, amountCent int64) (tradeNo string, reused bool, err error) {
+	if orderNo == "" || provider == "" {
+		return "", false, mallerr.E(mallerr.CodeInvalidParam, false, "建支付单缺 order_no/provider")
+	}
+	// 防御校验（与回调侧金额校验不冲突——ADR-007「金额校验以回调为准」指
+	// 错额拒付口径；订单金额在建单时已保证为正，此处兜底直连 RPC 的脏输入）。
+	if amountCent <= 0 {
+		return "", false, mallerr.E(mallerr.CodeInvalidParam, false, "创建支付单金额非法: %d", amountCent)
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row orderRow
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("order_no = ?", orderNo).First(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return mallerr.E(mallerr.CodeOrderNotFound, false, "订单不存在: %s", orderNo)
+		}
+		if err != nil {
+			return fmt.Errorf("mall-order: lock order %s: %w", orderNo, err)
+		}
+		if row.TenantID != tenantID {
+			return mallerr.E(mallerr.CodeOrderNotFound, false, "订单不存在: %s", orderNo)
+		}
+		if row.Status != orderStatusCreated {
+			return mallerr.E(mallerr.CodeOrderStateInvalid, false,
+				"订单状态不允许支付: %s（当前 %s）", orderNo, statusName(row.Status))
+		}
+		var inflight paymentRecordRow
+		err = tx.Where("order_no = ? AND status = ?", orderNo, paymentStatusCreated).
+			Order("id DESC").First(&inflight).Error
+		if err == nil {
+			tradeNo, reused = inflight.ProviderTradeNo, true
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("mall-order: load in-flight payment %s: %w", orderNo, err)
+		}
+		tradeNo = genTradeNo()
+		rec := paymentRecordRow{
+			OrderNo:         orderNo,
+			Provider:        provider,
+			ProviderTradeNo: tradeNo,
+			Status:          paymentStatusCreated,
+			AmountCent:      amountCent,
+		}
+		if err := tx.Create(&rec).Error; err != nil {
+			return fmt.Errorf("mall-order: insert in-flight payment %s: %w", orderNo, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return tradeNo, reused, nil
 }
 
 // getOrderByNo 按单号读订单（无租户过滤；回调路径无租户语境用）。

@@ -6,12 +6,10 @@
 package main
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"strconv"
 	"time"
@@ -176,13 +174,4 @@ func parseUintStr(s string) (uint64, error) {
 // jsonDecode 宽松解码（上游/下游 JSON 响应容错）。
 func jsonDecode(r io.Reader, into any) error {
 	return json.NewDecoder(r).Decode(into)
-}
-
-// randInt 6 位随机数（genTradeNo 用）。
-func randInt() (int64, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	if err != nil {
-		return 0, err
-	}
-	return n.Int64(), nil
 }

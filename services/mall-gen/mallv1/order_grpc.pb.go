@@ -24,6 +24,7 @@ const (
 	OrderService_GetOrder_FullMethodName            = "/mall.v1.OrderService/GetOrder"
 	OrderService_ListOrders_FullMethodName          = "/mall.v1.OrderService/ListOrders"
 	OrderService_MarkPaid_FullMethodName            = "/mall.v1.OrderService/MarkPaid"
+	OrderService_BeginPayment_FullMethodName        = "/mall.v1.OrderService/BeginPayment"
 	OrderService_CancelOrder_FullMethodName         = "/mall.v1.OrderService/CancelOrder"
 	OrderService_RefundOrder_FullMethodName         = "/mall.v1.OrderService/RefundOrder"
 	OrderService_GetCart_FullMethodName             = "/mall.v1.OrderService/GetCart"
@@ -53,6 +54,11 @@ type OrderServiceClient interface {
 	// paid=true 置 paid；paid=false 失败回调：payment_records 置 failed，
 	// 订单停留 created（R0 台账裁定）。
 	MarkPaid(ctx context.Context, in *MarkPaidReq, opts ...grpc.CallOption) (*OrderReply, error)
+	// 在途支付单建单步骤（PRD §5.2「CreatePayment 写 payment_records=created」；
+	// 契约 POST /orders/{no}/pay 的服务端半边）：订单行锁内复用在途单或新建
+	// created 流水并分配 trade_no，防同订单并发拉起多笔渠道支付。
+	// 订单非 created → MALL_30002；不存在/非本人 → MALL_30001。
+	BeginPayment(ctx context.Context, in *BeginPaymentReq, opts ...grpc.CallOption) (*BeginPaymentReply, error)
 	// 取消订单：仅 created 可取消 → closed(user) + 回补库存；幂等（已 closed 返回 200）。
 	CancelOrder(ctx context.Context, in *CancelOrderReq, opts ...grpc.CallOption) (*OrderReply, error)
 	// 退款；R1 仅 paid 分支：先作废 pending 履约行再退。
@@ -116,6 +122,16 @@ func (c *orderServiceClient) MarkPaid(ctx context.Context, in *MarkPaidReq, opts
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(OrderReply)
 	err := c.cc.Invoke(ctx, OrderService_MarkPaid_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orderServiceClient) BeginPayment(ctx context.Context, in *BeginPaymentReq, opts ...grpc.CallOption) (*BeginPaymentReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BeginPaymentReply)
+	err := c.cc.Invoke(ctx, OrderService_BeginPayment_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +219,11 @@ type OrderServiceServer interface {
 	// paid=true 置 paid；paid=false 失败回调：payment_records 置 failed，
 	// 订单停留 created（R0 台账裁定）。
 	MarkPaid(context.Context, *MarkPaidReq) (*OrderReply, error)
+	// 在途支付单建单步骤（PRD §5.2「CreatePayment 写 payment_records=created」；
+	// 契约 POST /orders/{no}/pay 的服务端半边）：订单行锁内复用在途单或新建
+	// created 流水并分配 trade_no，防同订单并发拉起多笔渠道支付。
+	// 订单非 created → MALL_30002；不存在/非本人 → MALL_30001。
+	BeginPayment(context.Context, *BeginPaymentReq) (*BeginPaymentReply, error)
 	// 取消订单：仅 created 可取消 → closed(user) + 回补库存；幂等（已 closed 返回 200）。
 	CancelOrder(context.Context, *CancelOrderReq) (*OrderReply, error)
 	// 退款；R1 仅 paid 分支：先作废 pending 履约行再退。
@@ -236,6 +257,9 @@ func (UnimplementedOrderServiceServer) ListOrders(context.Context, *ListOrdersRe
 }
 func (UnimplementedOrderServiceServer) MarkPaid(context.Context, *MarkPaidReq) (*OrderReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkPaid not implemented")
+}
+func (UnimplementedOrderServiceServer) BeginPayment(context.Context, *BeginPaymentReq) (*BeginPaymentReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method BeginPayment not implemented")
 }
 func (UnimplementedOrderServiceServer) CancelOrder(context.Context, *CancelOrderReq) (*OrderReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelOrder not implemented")
@@ -362,6 +386,24 @@ func _OrderService_MarkPaid_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(OrderServiceServer).MarkPaid(ctx, req.(*MarkPaidReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrderService_BeginPayment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BeginPaymentReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrderServiceServer).BeginPayment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrderService_BeginPayment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrderServiceServer).BeginPayment(ctx, req.(*BeginPaymentReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -500,6 +542,10 @@ var OrderService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkPaid",
 			Handler:    _OrderService_MarkPaid_Handler,
+		},
+		{
+			MethodName: "BeginPayment",
+			Handler:    _OrderService_BeginPayment_Handler,
 		},
 		{
 			MethodName: "CancelOrder",

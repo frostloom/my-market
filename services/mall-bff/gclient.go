@@ -32,6 +32,7 @@ type OrderClient interface {
 	GetOrder(ctx context.Context, in *mallv1.GetOrderReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
 	ListOrders(ctx context.Context, in *mallv1.ListOrdersReq, opts ...grpc.CallOption) (*mallv1.ListOrdersReply, error)
 	MarkPaid(ctx context.Context, in *mallv1.MarkPaidReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
+	BeginPayment(ctx context.Context, in *mallv1.BeginPaymentReq, opts ...grpc.CallOption) (*mallv1.BeginPaymentReply, error)
 	CancelOrder(ctx context.Context, in *mallv1.CancelOrderReq, opts ...grpc.CallOption) (*mallv1.OrderReply, error)
 	RefundOrder(ctx context.Context, in *mallv1.RefundOrderReq, opts ...grpc.CallOption) (*mallv1.RefundReply, error)
 	GetCart(ctx context.Context, in *mallv1.GetCartReq, opts ...grpc.CallOption) (*mallv1.CartReply, error)

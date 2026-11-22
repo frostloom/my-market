@@ -112,9 +112,9 @@ CREATE TABLE `payment_records` (
   `created_at`        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at`        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  KEY `idx_order_no` (`order_no`),
+  UNIQUE KEY `uk_order_provider_trade` (`order_no`,`provider`,`provider_trade_no`),
   KEY `idx_provider_trade` (`provider_trade_no`)
-) ENGINE=InnoDB COMMENT='支付流水（Provider 回调幂等依据：order_no+provider_trade_no）';
+) ENGINE=InnoDB COMMENT='支付流水（Provider 回调幂等依据：uk_order_provider_trade 组合唯一，DB 兜底防重复流水；order_no 前缀覆盖按单查询）';
 
 -- ---------- 履约 outbox ----------
 CREATE TABLE `fulfillment_tasks` (

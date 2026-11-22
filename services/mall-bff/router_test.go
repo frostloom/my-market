@@ -155,13 +155,36 @@ func (s *stubGoods) GetGoods(ctx context.Context, req *mallv1.GetGoodsReq, co ..
 }
 
 type stubOrder struct {
-	mu          sync.Mutex
-	markPaidRec []*mallv1.MarkPaidReq // MarkPaid 收到的请求（回调链路断言用）
-	getOrder    func(context.Context, *mallv1.GetOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
-	markPaid    func(*mallv1.MarkPaidReq) (*mallv1.OrderReply, error)
-	createCart  func(context.Context, *mallv1.CreateCartOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
-	createRech  func(context.Context, *mallv1.CreateRechargeOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
-	cartItems   []*mallv1.CartItem // GetCart 返回行（nil = 空购物车）
+	mu               sync.Mutex
+	markPaidRec      []*mallv1.MarkPaidReq // MarkPaid 收到的请求（回调链路断言用）
+	beginPaymentRec  []*mallv1.BeginPaymentReq
+	beginTradeNo     string // BeginPayment 返回单号（默认 MPSTUB）
+	getOrder         func(context.Context, *mallv1.GetOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
+	markPaid         func(*mallv1.MarkPaidReq) (*mallv1.OrderReply, error)
+	beginPaymentHook func(*mallv1.BeginPaymentReq) (*mallv1.BeginPaymentReply, error)
+	createCart       func(context.Context, *mallv1.CreateCartOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
+	createRech       func(context.Context, *mallv1.CreateRechargeOrderReq, ...grpc.CallOption) (*mallv1.OrderReply, error)
+	cartItems        []*mallv1.CartItem // GetCart 返回行（nil = 空购物车）
+}
+
+func (s *stubOrder) BeginPayment(ctx context.Context, req *mallv1.BeginPaymentReq, co ...grpc.CallOption) (*mallv1.BeginPaymentReply, error) {
+	s.mu.Lock()
+	s.beginPaymentRec = append(s.beginPaymentRec, req)
+	s.mu.Unlock()
+	if s.beginPaymentHook == nil {
+		trade := s.beginTradeNo
+		if trade == "" {
+			trade = "MPSTUB"
+		}
+		return &mallv1.BeginPaymentReply{TradeNo: trade}, nil
+	}
+	return s.beginPaymentHook(req)
+}
+
+func (s *stubOrder) beginPaymentCalls() []*mallv1.BeginPaymentReq {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*mallv1.BeginPaymentReq(nil), s.beginPaymentRec...)
 }
 
 func (s *stubOrder) CreateCartOrder(ctx context.Context, req *mallv1.CreateCartOrderReq, co ...grpc.CallOption) (*mallv1.OrderReply, error) {
@@ -569,6 +592,13 @@ func TestPayFlow_AsyncCallbackToPaid(t *testing.T) {
 	if payResp.Status != "created" || payResp.Payment.TradeNo == "" || payResp.Payment.Provider != "mock" {
 		t.Fatalf("pay 响应不符: %+v", payResp)
 	}
+	payTrade := payResp.Payment.TradeNo
+	// BeginPayment 建单步骤字段（tenant/order/amount 来自会话与订单）。
+	begins := fx.ord.beginPaymentCalls()
+	if len(begins) != 1 || begins[0].GetTenantId() != 1 || begins[0].GetOrderNo() != "M1" ||
+		begins[0].GetAmountCent() != 6900 || begins[0].GetProvider() != "mock" {
+		t.Fatalf("BeginPaymentReq 不符: %+v", begins)
+	}
 
 	// 2) 等异步回调落地（≤2s），断言 MarkPaid 收到验签后载荷。
 	//    断言在锁内读取后立即释放——后续请求的桩体也要用这把锁，不能持锁请求。
@@ -592,6 +622,10 @@ func TestPayFlow_AsyncCallbackToPaid(t *testing.T) {
 	if paidReq.GetTenantId() != 1 || paidReq.GetOrderNo() != "M1" || !paidReq.GetPaid() ||
 		paidReq.GetAmountCent() != 6900 || paidReq.GetProvider() != "mock" || paidReq.GetProviderTradeNo() == "" {
 		t.Fatalf("MarkPaidReq 字段不符: %+v", paidReq)
+	}
+	if paidReq.GetProviderTradeNo() != payTrade {
+		t.Fatalf("回调单号 %q != pay 响应单号 %q（必须沿用 BeginPayment 分配的在途单）",
+			paidReq.GetProviderTradeNo(), payTrade)
 	}
 
 	// 3) 回调后订单已 paid：GET /orders/{no} 可见
@@ -691,6 +725,40 @@ func TestCallback_FailedPayment_StaysCreated(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 8. TestErrorShape_NoCarrierGRPC_NoInternalLeak（契约 §0.2：无载体 gRPC 错误
+//    的 error 字段为固定人话文案，下游内部报文只进日志不进响应体）
+
+func TestErrorShape_NoCarrierGRPC_NoInternalLeak(t *testing.T) {
+	fx := newTestApp(t, nil)
+	tok := fx.gw.issue(t, 1)
+	fx.ord.getOrder = func(_ context.Context, _ *mallv1.GetOrderReq, _ ...grpc.CallOption) (*mallv1.OrderReply, error) {
+		return nil, status.Error(codes.Unavailable,
+			"Error 1062: Duplicate entry 'M1' for key 'payment_records.uk'")
+	}
+	rec := doReq(t, fx.app.Handler(), "GET", "/api/v1/orders/M1", tok, "", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HTTP = %d, want 503 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("错误体非法 JSON: %v body=%s", err, rec.Body.String())
+	}
+	if body.Error != "服务暂时不可用，请稍后重试" {
+		t.Fatalf("error 字段 = %q, want 固定人话文案", body.Error)
+	}
+	if strings.Contains(rec.Body.String(), "1062") || strings.Contains(rec.Body.String(), "Duplicate entry") {
+		t.Fatalf("错误体泄漏下游内部报文: %s", rec.Body.String())
+	}
+	if body.Code != "MALL_50003" {
+		t.Fatalf("code = %q, want MALL_50003", body.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 测试辅助
 
 func hexEncode(b []byte) string { return hex.EncodeToString(b) }
@@ -704,4 +772,37 @@ func hmacSHA256(secret, payload []byte) []byte {
 func signPayload(t *testing.T, secret, payload []byte) string {
 	t.Helper()
 	return hex.EncodeToString(hmacSHA256(secret, payload))
+}
+
+// ---------------------------------------------------------------------------
+// 9. TestPay_TOCTOU_PaidBetweenGetAndBegin（评审修复回归）
+// GetOrder 与 BeginPayment 之间订单被回调翻成 paid（mock 快回调竞窗）：
+// 重查分流返回 200 paid——契约「已支付返回当前状态（30002 仅用于已关闭/已退）」，
+// 不把瞬时竞窗暴露成 409。
+func TestPay_TOCTOU_PaidBetweenGetAndBegin(t *testing.T) {
+	fx := newTestApp(t, nil)
+	tok := fx.gw.issue(t, 1)
+	calls := 0
+	fx.ord.getOrder = func(_ context.Context, _ *mallv1.GetOrderReq, _ ...grpc.CallOption) (*mallv1.OrderReply, error) {
+		calls++
+		o := sampleOrder("created")
+		if calls >= 2 { // BeginPayment 落败后的重查看到 paid
+			o = sampleOrder("paid")
+		}
+		o.OrderNo = "M1"
+		return o, nil
+	}
+	fx.ord.beginPaymentHook = func(_ *mallv1.BeginPaymentReq) (*mallv1.BeginPaymentReply, error) {
+		return nil, mallerr.ToGRPC(mallerr.E(mallerr.CodeOrderStateInvalid, false, "订单状态不允许支付: paid"))
+	}
+	rec := doReq(t, fx.app.Handler(), "POST", "/api/v1/orders/M1/pay", tok, "", nil)
+	if rec.Code != 200 {
+		t.Fatalf("pay: HTTP = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Status != "paid" {
+		t.Fatalf("pay 响应 = %s (err=%v), want status=paid", rec.Body.String(), err)
+	}
 }

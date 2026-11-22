@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/frostloom/my-market/pkg/mallerr"
@@ -318,5 +319,278 @@ func TestMarkPaidTx_AmountMismatchFailsPayment(t *testing.T) {
 		if task.Status != 1 {
 			t.Fatalf("任务行 %d status = %d，want pending(1)", i, task.Status)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 6. TestBeginPaymentTx_CreatesAndReusesInFlight（PRD §5.2 规格对齐）
+// 首次建单落 created 流水；未回调前二次建单复用同号；失败回调后在途单失效，
+// 再建单分配新号。
+func TestBeginPaymentTx_CreatesAndReusesInFlight(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "begin-reuse", 113, 1)
+
+	// 1) 首次建单：created 流水 1 条、金额=订单金额
+	no1, reused, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil || reused || no1 == "" {
+		t.Fatalf("首次 BeginPaymentTx = (no=%q, reused=%v, err=%v)", no1, reused, err)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1", got)
+	}
+	recStatus, recAmount := paymentRecord(t, s, ord.OrderNo)
+	if recStatus != 1 || recAmount != ord.AmountCent {
+		t.Fatalf("在途流水 = (status=%d, amount=%d)，want (1 created, %d)", recStatus, recAmount, ord.AmountCent)
+	}
+
+	// 2) 未回调再建单：复用同号，不新增流水
+	no2, reused, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil || !reused || no2 != no1 {
+		t.Fatalf("二次 BeginPaymentTx = (no=%q, reused=%v, err=%v)，want 复用 %q", no2, reused, err, no1)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("复用后 payment_records = %d 条，want 仍 1", got)
+	}
+
+	// 3) 失败回调：在途单 created→failed；订单停留 created
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: no1,
+		Paid: false, AmountCent: ord.AmountCent,
+	}); err != nil {
+		t.Fatalf("失败回调 MarkPaidTx: %v", err)
+	}
+	if recStatus, _ = paymentRecord(t, s, ord.OrderNo); recStatus != 3 {
+		t.Fatalf("失败回调后流水 status = %d，want 3 failed", recStatus)
+	}
+	if status, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); status != "created" {
+		t.Fatalf("失败回调后订单 = %s，want created", status)
+	}
+
+	// 4) 死单不再占用在途位：再建单分配新号
+	no3, reused, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil || reused || no3 == "" || no3 == no1 {
+		t.Fatalf("失效后 BeginPaymentTx = (no=%q, reused=%v, err=%v)，want 新单号", no3, reused, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 7. TestBeginPaymentTx_PromotesInFlightToPaid
+// BeginPayment 建在途单后 paid 回调：在途单升级 paid（不新增流水），
+// 订单 created→paid，履约任务投递。
+func TestBeginPaymentTx_PromotesInFlightToPaid(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 115)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "begin-promote", 115, 1)
+	no, _, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil {
+		t.Fatalf("BeginPaymentTx: %v", err)
+	}
+
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: no,
+		Paid: true, AmountCent: ord.AmountCent, SignatureVerified: true,
+	}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1（在途单升级，不新增）", got)
+	}
+	if recStatus, _ := paymentRecord(t, s, ord.OrderNo); recStatus != 2 {
+		t.Fatalf("流水 status = %d，want 2 paid", recStatus)
+	}
+	if status, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); status != "paid" {
+		t.Fatalf("订单 = %s，want paid", status)
+	}
+	if tasks := taskRowsOf(t, s, ord.OrderNo); len(tasks) != len(ord.Items) {
+		t.Fatalf("fulfillment_tasks = %d 行，want %d", len(tasks), len(ord.Items))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. TestBeginPaymentTx_RejectsNonCreatedOrWrongTenant
+// 订单非 created（已 paid）→ MALL_30002；非本租户 → MALL_30001（不泄漏存在性）；
+// 金额 ≤0 → MALL_10005（防御校验，接替已删除的旧 bff CreatePayment 同款防线）。
+func TestBeginPaymentTx_RejectsNonCreatedOrWrongTenant(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA, testTenantB)
+	snapshotStock(t, s, 116)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "begin-reject", 116, 1)
+
+	if _, _, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", 0); err == nil {
+		t.Fatalf("金额 0 建单成功：want MALL_10005")
+	} else {
+		assertMallCode(t, err, mallerr.CodeInvalidParam)
+	}
+
+	if _, _, err := s.BeginPaymentTx(ctx, testTenantB, ord.OrderNo, "mock", ord.AmountCent); err == nil {
+		t.Fatalf("跨租户 BeginPaymentTx 成功：want MALL_30001")
+	} else {
+		assertMallCode(t, err, mallerr.CodeOrderNotFound)
+	}
+
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: "T-begin-reject-1",
+		Paid: true, AmountCent: ord.AmountCent,
+	}); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	if _, _, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent); err == nil {
+		t.Fatalf("已支付 BeginPaymentTx 成功：want MALL_30002")
+	} else {
+		assertMallCode(t, err, mallerr.CodeOrderStateInvalid)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 9. TestBeginPaymentTx_ConcurrentSameOrderSingleInFlight
+// 并发两次建单（双击 /pay 竞态）：都成功、同号、在途流水仍恰 1 条
+// ——PRD §5.2 在途单即双支付防线。
+func TestBeginPaymentTx_ConcurrentSameOrderSingleInFlight(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "begin-conc", 113, 1)
+
+	const n = 8
+	trades := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			trades[i], _, errs[i] = s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("并发建单 %d 失败: %v（快路径 500 即缺陷）", i, errs[i])
+		}
+		if trades[i] != trades[0] {
+			t.Fatalf("并发建单 %d 单号 %q != 首个 %q（必须复用在途单）", i, trades[i], trades[0])
+		}
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 10. TestPaymentRecords_UniqueKeyDBGuard
+// uk_order_provider_trade 组合唯一键在 DB 层兜底：同组合重复插入报错
+// （幂等不再只依赖「写入前锁订单行」的代码纪律）。
+func TestPaymentRecords_UniqueKeyDBGuard(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 115)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "begin-uk", 115, 1)
+
+	rec := paymentRecordRow{
+		OrderNo: ord.OrderNo, Provider: "mock", ProviderTradeNo: "T-uk-dup",
+		Status: paymentStatusCreated, AmountCent: ord.AmountCent,
+	}
+	if err := s.db.WithContext(ctx).Create(&rec).Error; err != nil {
+		t.Fatalf("首条流水插入: %v", err)
+	}
+	rec2 := paymentRecordRow{
+		OrderNo: ord.OrderNo, Provider: "mock", ProviderTradeNo: "T-uk-dup",
+		Status: paymentStatusCreated, AmountCent: ord.AmountCent,
+	}
+	if err := s.db.WithContext(ctx).Create(&rec2).Error; err == nil {
+		t.Fatalf("同组合重复插入成功：uk_order_provider_trade 未生效")
+	} else if !strings.Contains(err.Error(), "1062") {
+		t.Fatalf("重复插入错误非 1062 撞键: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 11. TestMarkPaidTx_AmountMismatchVoidsInFlight（评审修复回归）
+// 错额 paid 回调落在在途单（created）上：降级 failed 并留错额审计
+// （amount_cent 记回调金额），订单停留 created；在途位释放——再建单分配新号。
+func TestMarkPaidTx_AmountMismatchVoidsInFlight(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "begin-mismatch", 113, 1)
+	no, _, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil {
+		t.Fatalf("BeginPaymentTx: %v", err)
+	}
+
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: no,
+		Paid: true, AmountCent: ord.AmountCent + 999, SignatureVerified: true,
+	}); err != nil {
+		t.Fatalf("错额回调 MarkPaidTx: %v", err)
+	}
+
+	// 流水降级 failed、金额记回调金额（错额审计口径）
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1", got)
+	}
+	recStatus, recAmount := paymentRecord(t, s, ord.OrderNo)
+	if recStatus != 3 || recAmount != ord.AmountCent+999 {
+		t.Fatalf("流水 = (status=%d, amount=%d)，want (3 failed, %d)", recStatus, recAmount, ord.AmountCent+999)
+	}
+	if status, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); status != "created" {
+		t.Fatalf("订单 = %s，want created", status)
+	}
+
+	// 在途位已释放：再建单拿到新单号（旧实现会永远复用死单）
+	no2, reused, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil || reused || no2 == "" || no2 == no {
+		t.Fatalf("释放后再建单 = (no=%q, reused=%v, err=%v)，want 新单号", no2, reused, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+//  12. TestMarkPaidTx_PaidReplayAfterRefundStaysRefunded（二轮评审 c3 回归，
+//     预存在缺陷收口）：退款后迟到的 paid 重放不得把流水翻回 paid。
+func TestMarkPaidTx_PaidReplayAfterRefundStaysRefunded(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 115)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "pay-refund-replay", 115, 1)
+	cb := Callback{OrderNo: ord.OrderNo, Provider: "mock", TradeNo: "T-refund-replay-1",
+		Paid: true, AmountCent: ord.AmountCent, SignatureVerified: true}
+	if err := s.MarkPaidTx(ctx, cb); err != nil {
+		t.Fatalf("MarkPaidTx: %v", err)
+	}
+	if err := s.RefundPaid(ctx, testTenantA, ord.OrderNo); err != nil {
+		t.Fatalf("RefundPaid: %v", err)
+	}
+	if status, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); status != "refunded" {
+		t.Fatalf("退款后订单 = %s，want refunded", status)
+	}
+
+	// 迟到的 paid 重放：流水保持 refunded、订单保持 refunded
+	if err := s.MarkPaidTx(ctx, cb); err != nil {
+		t.Fatalf("重放 MarkPaidTx: %v", err)
+	}
+	if recStatus, _ := paymentRecord(t, s, ord.OrderNo); recStatus != 4 {
+		t.Fatalf("重放后流水 status = %d，want 4 refunded（终态不得翻回）", recStatus)
+	}
+	if status, _ := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); status != "refunded" {
+		t.Fatalf("重放后订单 = %s，want refunded", status)
 	}
 }

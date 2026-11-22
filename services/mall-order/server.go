@@ -129,6 +129,25 @@ func (s *orderServer) MarkPaid(ctx context.Context, req *mallv1.MarkPaidReq) (*m
 	return toProtoOrder(ord), nil
 }
 
+// BeginPayment 在途支付单建单（契约 POST /orders/{no}/pay 的服务端半边，
+// PRD §5.2「CreatePayment 写 payment_records=created」）：订单行锁内复用
+// 在途单或新建 created 流水并分配 trade_no。reused=true 表示复用——调用方
+// 沿用该单号，不得再向渠道新建支付。归属/状态校验见 BeginPaymentTx。
+func (s *orderServer) BeginPayment(ctx context.Context, req *mallv1.BeginPaymentReq) (*mallv1.BeginPaymentReply, error) {
+	var tenantID uint64
+	var orderNo, provider string
+	var amountCent int64
+	if req != nil {
+		tenantID, orderNo, provider, amountCent =
+			req.GetTenantId(), req.GetOrderNo(), req.GetProvider(), req.GetAmountCent()
+	}
+	tradeNo, reused, err := s.store.BeginPaymentTx(ctx, tenantID, orderNo, provider, amountCent)
+	if err != nil {
+		return nil, toGRPCError(err)
+	}
+	return &mallv1.BeginPaymentReply{TradeNo: tradeNo, Reused: reused}, nil
+}
+
 // CancelOrder 取消订单（契约 POST /orders/{no}/cancel）：仅 created 可取消
 // → closed(user) + 回补库存；幂等（已 closed 返回当前状态 200）。
 func (s *orderServer) CancelOrder(ctx context.Context, req *mallv1.CancelOrderReq) (*mallv1.OrderReply, error) {

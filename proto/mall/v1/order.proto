@@ -28,6 +28,12 @@ service OrderService {
   // 订单停留 created（R0 台账裁定）。
   rpc MarkPaid(MarkPaidReq) returns (OrderReply);
 
+  // 在途支付单建单步骤（PRD §5.2「CreatePayment 写 payment_records=created」；
+  // 契约 POST /orders/{no}/pay 的服务端半边）：订单行锁内复用在途单或新建
+  // created 流水并分配 trade_no，防同订单并发拉起多笔渠道支付。
+  // 订单非 created → MALL_30002；不存在/非本人 → MALL_30001。
+  rpc BeginPayment(BeginPaymentReq) returns (BeginPaymentReply);
+
   // 取消订单：仅 created 可取消 → closed(user) + 回补库存；幂等（已 closed 返回 200）。
   rpc CancelOrder(CancelOrderReq) returns (OrderReply);
 
@@ -97,6 +103,22 @@ message MarkPaidReq {
 message CancelOrderReq {
   uint64 tenant_id = 1;
   string order_no = 2;
+}
+
+// BeginPaymentReq 在途支付单建单请求。amount_cent 为订单金额快照
+// （落 created 流水，回调时与订单金额复核）。
+message BeginPaymentReq {
+  uint64 tenant_id = 1;
+  string order_no = 2;
+  string provider = 3;
+  int64 amount_cent = 4;
+}
+
+// BeginPaymentReply 在途支付单结果。reused=true 表示复用了既有在途单
+// （调用方不得再向渠道新建支付单，应沿用该 trade_no）。
+message BeginPaymentReply {
+  string trade_no = 1;
+  bool reused = 2;
 }
 
 // RefundOrderReq 退款请求；R1 仅 paid 分支（契约 §5）。

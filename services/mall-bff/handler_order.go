@@ -1,7 +1,9 @@
 // handler_order.go：订单/支付编排端点（api-contract §5）。
 //
-// 支付编排（task-6 裁定 4，D13 同口径）：bff 持 PaymentProvider——
-// POST /orders/{no}/pay → 会话校验 + GetOrder(tenant) → provider.CreatePayment
+// 支付编排（task-6 裁定 4，D13 同口径；2026-11-22 建单步骤改走 BeginPayment，
+// PRD §5.2「CreatePayment 写 payment_records=created」落位）：bff 持 PayProvider
+// （渠道回调侧）——POST /orders/{no}/pay → 会话校验 + GetOrder(tenant) →
+// orders.BeginPayment（mall-order 订单行锁内建/复用在途单并分配 trade_no）
 // → 200 {status, payment}；MockProvider 内部 goroutine ~200ms 后向
 // PAY_CALLBACK_URL POST HMAC-SHA256 签名载荷（密钥 PAY_CALLBACK_SECRET），
 // 模拟真实渠道异步回调。
@@ -21,7 +23,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -271,16 +272,17 @@ func orderScoped(orders OrderClient, fn func(ctx context.Context, orders OrderCl
 // ---------------------------------------------------------------------------
 // 支付编排（bff 持 Provider）
 
-// PayProvider 支付渠道抽象（bff 侧；与 mall-order 的 PaymentProvider 语义一致，
-// R1 仅 mock）。CreatePayment 返回渠道侧支付单号。
+// PayProvider 支付渠道抽象（bff 侧，R1 仅 mock）。在途支付单（trade_no）
+// 由 mall-order BeginPayment 落库分配（PRD §5.2）；渠道侧只负责按单号
+// 回调——真实渠道接入时在此扩 CreatePayment（拿 BeginPayment 的单号去渠道建单）。
 type PayProvider interface {
-	CreatePayment(ctx context.Context, orderNo string, amountCent int64) (tradeNo string, err error)
 	ScheduleCallback(cb callbackPayload)
 }
 
-// MockProvider 进程内占位渠道：签发 trade_no 后起 goroutine，延迟
-// cfg.CallbackDelay（生产默认 ~200ms）向 PAY_CALLBACK_URL POST HMAC-SHA256
-// 签名载荷，模拟真实渠道异步回调（真实渠道接入后按 ADR-007 替换实现）。
+// MockProvider 进程内占位渠道：拿到 mall-order BeginPayment 分配的 trade_no
+// 后起 goroutine，延迟 cfg.CallbackDelay（生产默认 ~200ms）向 PAY_CALLBACK_URL
+// POST HMAC-SHA256 签名载荷，模拟真实渠道异步回调（真实渠道接入后按 ADR-007
+// 替换实现）。
 type MockProvider struct {
 	callbackURL func() string // 动态解析（测试可先行注入 httptest 基址）
 	secret      []byte
@@ -322,15 +324,9 @@ type callbackPayload struct {
 // signatureHeader HMAC 签名请求头（hex(HMAC-SHA256(secret, rawBody))）。
 const signatureHeader = "X-Signature"
 
-func (p *MockProvider) CreatePayment(_ context.Context, orderNo string, amountCent int64) (string, error) {
-	if orderNo == "" {
-		return "", mallerr.E(mallerr.CodeInvalidParam, false, "创建支付单缺 order_no")
-	}
-	if amountCent <= 0 {
-		return "", mallerr.E(mallerr.CodeInvalidParam, false, "创建支付单金额非法: %d", amountCent)
-	}
-	return genTradeNo(), nil
-}
+// providerMock 当前部署的支付渠道标识（ADR-007 档一；真实渠道接入时改为
+// 配置项——三处使用点：BeginPayment 建单、回调载荷、payView 响应）。
+const providerMock = "mock"
 
 // ScheduleCallback 异步投递回调（独立 goroutine；失败仅记日志——渠道回调
 // 天然重试语义由调用方幂等兜底）。
@@ -363,17 +359,9 @@ func (p *MockProvider) ScheduleCallback(cb callbackPayload) {
 	}()
 }
 
-// genTradeNo 渠道支付单号：MP + yyyyMMddHHmmss + 6 位随机（CHAR(128) 上限内）。
-func genTradeNo() string {
-	n, err := randInt()
-	if err != nil {
-		n = 0 // 熵源故障退化：唯一性由 payment_records 组合幂等键兜底
-	}
-	return "MP" + time.Now().Format("20060102150405") + leftPad6(n)
-}
-
 // handlePay POST /orders/{no}/pay：会话校验 + GetOrder(tenant) →
-// created → CreatePayment + 异步回调排程 → 200 created；
+// created → BeginPayment（mall-order 在途单落库/复用，分配 trade_no）
+// + 异步回调排程 → 200 created；
 // paid/fulfilled → 200 paid（幂等，不重复拉起支付）；
 // closed/refunded → MALL_30002（契约：30002 仅用于已关闭/已退）。
 func handlePay(orders OrderClient, provider PayProvider) gin.HandlerFunc {
@@ -386,14 +374,37 @@ func handlePay(orders OrderClient, provider PayProvider) gin.HandlerFunc {
 		case "paid", "fulfilled":
 			return payView("paid", ord.GetOrderNo(), ""), nil
 		case "created":
-			tradeNo, err := provider.CreatePayment(ctx, ord.GetOrderNo(), ord.GetAmountCent())
+			// 在途支付单（payment_records=created）在 mall-order 建单/复用并
+			// 分配 trade_no（PRD §5.2）；复用时返回同号，防止并发拉起多笔
+			// 渠道支付（双扣款）。关单竞态由 BeginPayment 锁下复查兜住（30002）。
+			begin, err := orders.BeginPayment(ctx, &mallv1.BeginPaymentReq{
+				TenantId:   tenant,
+				OrderNo:    ord.GetOrderNo(),
+				Provider:   providerMock,
+				AmountCent: ord.GetAmountCent(),
+			})
 			if err != nil {
+				// TOCTOU：GetOrder 与 BeginPayment 之间订单可能已被回调翻成
+				// paid（mock 快回调/并发回调）。契约口径「已支付返回当前状态
+				//（30002 仅用于已关闭/已退）」——重查一次分流，不把瞬时竞窗
+				// 暴露成 409；closed/refunded 维持 30002 原样透传。
+				if code, _, ok := mallerr.FromGRPC(err); ok && code == mallerr.CodeOrderStateInvalid {
+					if again, gerr := orders.GetOrder(ctx, &mallv1.GetOrderReq{TenantId: tenant, OrderNo: orderNo}); gerr == nil {
+						switch again.GetStatus() {
+						case "paid", "fulfilled":
+							return payView("paid", again.GetOrderNo(), ""), nil
+						}
+					}
+				}
 				return nil, err
 			}
+			tradeNo := begin.GetTradeNo()
 			// 异步回调载荷：tenant 取自当前会话（验签后的信任链起点）。
+			// 复用在途单时同样排程（MarkPaidTx 幂等，重复回调 no-op——
+			// 兼作上一轮回调丢失的恢复路径）。
 			provider.ScheduleCallback(callbackPayload{
 				OrderNo:    ord.GetOrderNo(),
-				Provider:   "mock",
+				Provider:   providerMock,
 				TradeNo:    tradeNo,
 				Paid:       true,
 				AmountCent: ord.GetAmountCent(),
@@ -408,7 +419,7 @@ func handlePay(orders OrderClient, provider PayProvider) gin.HandlerFunc {
 
 // payView 契约 §5 pay 响应：{"status":"paid|created","payment":{...}}。
 func payView(status, orderNo, tradeNo string) gin.H {
-	payment := gin.H{"order_no": orderNo, "provider": "mock", "status": status}
+	payment := gin.H{"order_no": orderNo, "provider": providerMock, "status": status}
 	if tradeNo != "" {
 		payment["trade_no"] = tradeNo
 	}
@@ -466,13 +477,4 @@ func verifyCallback(secret, raw []byte, sig string) (*callbackPayload, error) {
 		return nil, mallerr.E(mallerr.CodeCallbackSignInvalid, false, "回调载荷非法")
 	}
 	return &cb, nil
-}
-
-// leftPad6 6 位数字补零。
-func leftPad6(n int64) string {
-	s := big.NewInt(n).String()
-	for len(s) < 6 {
-		s = "0" + s
-	}
-	return s
 }

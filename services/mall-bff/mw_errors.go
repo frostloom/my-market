@@ -94,11 +94,13 @@ func writeErr(c *gin.Context, log *slog.Logger, err error) {
 	}
 
 	// 3) 无载体 gRPC 错误：按 gRPC 码粗映射 HTTP 状态，契约码 5xxx 兜底。
+	// 响应体不透传 st.Message()（可能含下游内部报文，违反契约 §0.2「人话」
+	// 口径——真实下游均带载体，此路径仅防御），原文只进日志。
 	st, isStatus := status.FromError(err)
 	if isStatus {
 		httpStatus, code := coarseMap(st.Code())
 		log.Warn("downstream error without mallerr carrier", "grpc_code", st.Code().String(), "msg", st.Message())
-		respondErr(c, httpStatus, code, retryableOf(code), st.Message())
+		respondErr(c, httpStatus, code, retryableOf(code), "服务暂时不可用，请稍后重试")
 		return
 	}
 

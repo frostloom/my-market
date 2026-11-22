@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -292,4 +293,42 @@ func insertSeckillActivity(t *testing.T, s *Store, goodsID uint64, status int8) 
 		}
 	})
 	return id
+}
+
+// ---------------------------------------------------------------------------
+// 14. TestAddCart_ConcurrentSameGoodsNoLostUpdate（审查 M3 修复回归）
+// 并发加购同商品（首加即竞态）：全部成功（无 1062 透出的 500）、
+// 恰 1 行、qty = 各次之和（读改写合并会丢累加）。
+func TestAddCart_ConcurrentSameGoodsNoLostUpdate(t *testing.T) {
+	s := openOrderTestStore(t)
+	cleanupTenant(t, s, testTenantC)
+
+	const n = 8
+	const each = 2
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = s.AddCart(context.Background(), testTenantC, 101, each)
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("并发加购 %d 失败: %v（撞键分流缺陷：不应 500/透内部报文）", i, errs[i])
+		}
+	}
+	var rows int64
+	if err := s.db.Raw("SELECT COUNT(*) FROM cart_items WHERE tenant_id = ? AND goods_id = ?", testTenantC, 101).
+		Scan(&rows).Error; err != nil || rows != 1 {
+		t.Fatalf("cart_items = (%d 行, err=%v)，want 1 行", rows, err)
+	}
+	var qty int
+	if err := s.db.Raw("SELECT qty FROM cart_items WHERE tenant_id = ? AND goods_id = ?", testTenantC, 101).
+		Scan(&qty).Error; err != nil || qty != n*each {
+		t.Fatalf("合并后 qty = (%d, err=%v)，want %d（不得丢累加）", qty, err, n*each)
+	}
 }
