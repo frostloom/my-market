@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -11,6 +12,13 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
+
+// ErrLedgerBehind 批量落账窗口内该租户还有未落 MySQL 的账单（或 flush 正在
+// 写入）。此时账本列是旧的，Redis 才是这份余额（requireCashMatch 同口径）；
+// 任何从账本重建投影的路径都必须跳过——把旧列盖回 Redis 会复活已扣的钱，
+// 让并发请求把同一余额花两次。调用方均持租户锁，而 Reserve 的
+// 「Lua 扣款 + 缓冲入队」在同一把锁内完成，锁内判定 behind 即无竞态。
+var ErrLedgerBehind = errors.New("billing: ledger batch behind, redis is authoritative")
 
 // One pinned session owns both the tenant lock and any nested request lock.
 // Its Redis token fences delayed workers after MySQL releases a lost session.
@@ -119,6 +127,11 @@ func (s *Store) rebuildCash(ctx context.Context, tenant uint64, guard, owner str
 	}
 	if row.Status != 0 && (s.cash == nil || !s.cash.allowDisabledTerminal) {
 		return 0, fmt.Errorf("tenant disabled: %d", tenant)
+	}
+	// 批量落账窗口守卫（单点，覆盖全部重建入口：观测/对账/失败恢复）。
+	// behindColumn = 列缺增量（pending≠0）或 flush 写入中；幂等模式不受影响。
+	if s.batch != nil && s.batch.behindColumn(tenant) {
+		return 0, ErrLedgerBehind
 	}
 	bal, err := LedgerBalance(ctx, s.db, tenant)
 	if err != nil {

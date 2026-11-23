@@ -175,6 +175,20 @@ func (b *ledgerBatch) behind(tenantID uint64) bool {
 	return b.open[tenantID] > 0
 }
 
+// behindColumn 精确判定「该租户的 ledger_balance 列是否缺增量」：pending != 0
+// （缓冲里有未落列的 reserve/settle 净额）或 flush 事务正在写入。
+// 与 behind() 的区别：open>0 只表示生命周期未闭合（已落列但未 settle 的
+// 在途 reserve 也计入）——列本身是新的，不得据此阻塞投影重建，否则对账
+// 兜底对一切有在途流量的租户长期失效。
+func (b *ledgerBatch) behindColumn(tenantID uint64) bool {
+	if b.flushBusy.Load() {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.pending[tenantID] != 0
+}
+
 func (b *ledgerBatch) alloc(db *gorm.DB) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -373,7 +373,11 @@ func (s *Store) meOverviewCash(ctx context.Context, tenantID uint64) (*MeView, e
 	if err != nil {
 		return nil, err
 	}
-	if bal != ledger {
+	// 批量落账窗口内（该租户账本列缺增量或 flush 进行中）Redis 是权威——
+	// 一致性比对与重建都跳过（requireCashMatch 同口径），直接以 Redis 活值
+	// 作答；否则会把已扣未落账的钱「查」回来（审查 H1）。
+	// behindColumn 只看列staleness：已落列未 settle 的在途单不阻塞比对。
+	if bal != ledger && !(s.batch != nil && s.batch.behindColumn(tenantID)) {
 		if _, err = s.RebuildBalance(ctx, tenantID); err != nil {
 			return nil, fmt.Errorf("账单不一致，已暂停：%w", err)
 		}
@@ -1582,6 +1586,10 @@ func (s *Store) requireCashMatch(ctx context.Context, tenantID uint64) error {
 	}
 	if live != ledger {
 		if _, err = s.rebuildCash(ctx, tenantID, "", ""); err != nil {
+			if errors.Is(err, ErrLedgerBehind) {
+				// 比对后 flush 恰好开始：本轮信任 Redis，下轮收敛。
+				return nil
+			}
 			return err
 		}
 		live, err = s.getBalance(ctx, tenantID)

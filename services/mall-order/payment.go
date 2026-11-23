@@ -245,6 +245,39 @@ func (s *Store) MarkPaidTx(ctx context.Context, cb Callback) error {
 			return nil
 		}
 
+		// 2.6) 迟到回调冲正（审查 H3）：订单已 closed（超时/主动取消——库存已
+		// 回补、履约未投递、资金从未进 billing）或已 refunded 后，收到正确
+		// 金额的 paid 回调（新单号，或在途/失败单号的迟到成功）：渠道已扣款
+		// 而商城无法履约——受理为流水但直接落 refunded（渠道侧退款语义），
+		// 订单保持终态，回调受理 200（渠道停止重试，不再产生无收敛路径的
+		// 孤儿 paid 流水）。错额回调不在此列，仍走 2.5 拒付分支留 failed 审计。
+		if cb.Paid && (row.Status == orderStatusClosed || row.Status == orderStatusRefunded) && cb.AmountCent == row.AmountCent {
+			if hasExisting {
+				// 在途单（created）或失败单（failed）转 refunded；paid/refunded
+				// 旧流水已被上方幂等/终态分支吸收，此处不可达。
+				if err := tx.Model(&paymentRecordRow{}).Where("id = ?", exist.ID).
+					Updates(map[string]any{
+						"status":             paymentStatusRefunded,
+						"amount_cent":        cb.AmountCent,
+						"callback_payload":   string(payloadJSON),
+						"signature_verified": sigFlag(cb.SignatureVerified),
+					}).Error; err != nil {
+					return fmt.Errorf("mall-order: auto-refund late record %s: %w", cb.OrderNo, err)
+				}
+				return nil
+			}
+			rec := paymentRecordRow{
+				OrderNo: cb.OrderNo, Provider: cb.Provider, ProviderTradeNo: cb.TradeNo,
+				Status: paymentStatusRefunded, AmountCent: cb.AmountCent,
+				CallbackPayload:   strPtr(string(payloadJSON)),
+				SignatureVerified: sigFlag(cb.SignatureVerified),
+			}
+			if err := tx.Create(&rec).Error; err != nil {
+				return fmt.Errorf("mall-order: insert auto-refund record %s: %w", cb.OrderNo, err)
+			}
+			return nil
+		}
+
 		// 2.5) 金额校验（sequences §1 三分支）：paid 回调金额 ≠ 订单金额 → 拒付——
 		//      落 failed 流水（amount_cent 记回调金额，订单金额补进审计载荷），
 		//      订单停留 created，返回 nil（回调被受理但不置 paid，对 HTTP 回调 200）。

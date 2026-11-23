@@ -594,3 +594,72 @@ func TestMarkPaidTx_PaidReplayAfterRefundStaysRefunded(t *testing.T) {
 		t.Fatalf("重放后订单 = %s，want refunded", status)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 13. TestMarkPaidTx_LatePaidOnClosedOrderAutoRefunded（审查 H3 修复回归）
+// 关单后迟到的正确金额 paid 回调：流水直接落 refunded（渠道侧退款语义）、
+// 订单保持 closed、回调受理成功；重放与新单号迟到同样收敛，无孤儿 paid 流水。
+func TestMarkPaidTx_LatePaidOnClosedOrderAutoRefunded(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 113)
+
+	ord := createTestOrder(t, s, ctx, testTenantA, "late-closed", 113, 1)
+	no, _, err := s.BeginPaymentTx(ctx, testTenantA, ord.OrderNo, "mock", ord.AmountCent)
+	if err != nil {
+		t.Fatalf("BeginPaymentTx: %v", err)
+	}
+	if err := s.CancelOrder(ctx, testTenantA, ord.OrderNo); err != nil {
+		t.Fatalf("CancelOrder: %v", err)
+	}
+
+	// 在途单号的迟到 paid：转 refunded，订单保持 closed
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: no,
+		Paid: true, AmountCent: ord.AmountCent, SignatureVerified: true,
+	}); err != nil {
+		t.Fatalf("迟到回调 MarkPaidTx: %v", err)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("payment_records = %d 条，want 1", got)
+	}
+	if recStatus, recAmount := paymentRecord(t, s, ord.OrderNo); recStatus != 4 || recAmount != ord.AmountCent {
+		t.Fatalf("流水 = (status=%d, amount=%d)，want (4 refunded, %d)", recStatus, recAmount, ord.AmountCent)
+	}
+	if status, reason := orderStatusOf(t, s, ctx, testTenantA, ord.OrderNo); status != "closed" || reason != "user" {
+		t.Fatalf("订单 = (%s, %s)，want (closed, user)", status, reason)
+	}
+
+	// 同单号重放：no-op
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: no,
+		Paid: true, AmountCent: ord.AmountCent,
+	}); err != nil {
+		t.Fatalf("重放 MarkPaidTx: %v", err)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 1 {
+		t.Fatalf("重放后 payment_records = %d 条，want 1", got)
+	}
+
+	// 新单号迟到 paid：同样直接落 refunded
+	if err := s.MarkPaidTx(ctx, Callback{
+		OrderNo: ord.OrderNo, Provider: "mock", TradeNo: "T-late-new-1",
+		Paid: true, AmountCent: ord.AmountCent,
+	}); err != nil {
+		t.Fatalf("新单号迟到 MarkPaidTx: %v", err)
+	}
+	if got := paymentRowCount(t, s, ord.OrderNo); got != 2 {
+		t.Fatalf("新单号后 payment_records = %d 条，want 2", got)
+	}
+	var statuses []int8
+	if err := s.db.Raw("SELECT status FROM payment_records WHERE order_no = ? ORDER BY id", ord.OrderNo).
+		Scan(&statuses).Error; err != nil {
+		t.Fatalf("读流水状态: %v", err)
+	}
+	for i, st := range statuses {
+		if st != 4 {
+			t.Fatalf("流水 %d status = %d，want 4 refunded（不得出现孤儿 paid）", i, st)
+		}
+	}
+}

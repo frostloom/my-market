@@ -765,6 +765,9 @@ func (s *Store) ensureBalanceKey(ctx context.Context, tenant uint64) error {
 		return err
 	}
 	_, err = locked.rebuildCash(locked.cashSQLContext(), tenant, "", "")
+	if errors.Is(err, ErrLedgerBehind) {
+		return nil // 批量窗口：等 flush/下一笔 Reserve 补种，不在此复活旧列
+	}
 	return err
 }
 
@@ -1108,7 +1111,8 @@ func (s *Store) settleCash(ctx context.Context, req *billingv1.SettleRequest) (*
 		}
 		// A missing delta guard does not prove that Redis was unchanged.
 		// Rebuild from committed SQL state while the tenant lock is held.
-		if _, repairErr := s.rebuildCash(ctx, row.TenantID, "", ""); repairErr != nil {
+		// 批量窗口内跳过（哨兵）：Redis 活值即权威，重试负责后续收敛。
+		if _, repairErr := s.rebuildCash(ctx, row.TenantID, "", ""); repairErr != nil && !errors.Is(repairErr, ErrLedgerBehind) {
 			return nil, &terminalProjectionRepairFailure{operation: "settle insert", cause: err, repair: repairErr}
 		}
 		return nil, status.Errorf(codes.Unavailable, "settle insert: %v", err)
@@ -1138,7 +1142,9 @@ func (s *Store) recoverTerminalProjection(ctx context.Context, tenant uint64, re
 		locked.cash.allowDisabledTerminal = true
 		err = locked.repairOrphanGuard(locked.cashSQLContext(), tenant, DeltaGuardKey(requestID))
 		if err == nil {
-			_, err = locked.rebuildCash(locked.cashSQLContext(), tenant, "", "")
+			if _, rErr := locked.rebuildCash(locked.cashSQLContext(), tenant, "", ""); rErr != nil && !errors.Is(rErr, ErrLedgerBehind) {
+				err = rErr
+			}
 		}
 	}
 	if err != nil {
@@ -1246,7 +1252,8 @@ func (s *Store) reverseCash(ctx context.Context, req *billingv1.ReverseRequest) 
 			return nil, &terminalProjectionRepairFailure{operation: "reverse update", cause: err, repair: repairErr}
 		}
 		// The guard may have disappeared after the refund changed Redis.
-		if _, repairErr := s.rebuildCash(ctx, row.TenantID, "", ""); repairErr != nil {
+		// 批量窗口内跳过（哨兵）：Redis 活值即权威，重试负责后续收敛。
+		if _, repairErr := s.rebuildCash(ctx, row.TenantID, "", ""); repairErr != nil && !errors.Is(repairErr, ErrLedgerBehind) {
 			return nil, &terminalProjectionRepairFailure{operation: "reverse update", cause: err, repair: repairErr}
 		}
 		return nil, status.Errorf(codes.Unavailable, "reverse update: %v", err)
@@ -1272,7 +1279,13 @@ func (s *Store) RebuildBalance(ctx context.Context, tenantID uint64) (int64, err
 		return 0, err
 	}
 	defer release()
-	return locked.rebuildCash(locked.cashSQLContext(), tenantID, "", "")
+	bal, err := locked.rebuildCash(locked.cashSQLContext(), tenantID, "", "")
+	if errors.Is(err, ErrLedgerBehind) {
+		// 批量落账窗口（reconciler RebuildAll / 观测路径都会走到这里）：
+		// 跳过重建，返回 Redis 当前值（权威）；flush 落账后下一轮自然收敛。
+		return locked.getBalance(locked.cashSQLContext(), tenantID)
+	}
+	return bal, err
 }
 
 // ValidateAPIKey 按 SHA-256 哈希查 key，校验状态与过期时间。
