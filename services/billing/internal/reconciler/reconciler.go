@@ -125,9 +125,10 @@ func (r *Reconciler) HTTPHandler() http.Handler {
 
 const sweepPageSize = 256
 
-// A slow billing call must not indefinitely block every later pending bill.
+// A slow billing call must not indefinitely block every later pending bill
+// (Sweep 的 Reverse/Settle 与 RebuildAll 的逐租户 Rebuild 同一口径).
 // A timeout leaves the result unknown; the next sweep retries idempotently.
-const settleRPCTimeout = 10 * time.Second
+const billingRPCTimeout = 10 * time.Second
 
 // SweepOnce 跑一轮扫描 + 分类 + 收敛。每行的写操作都是 billing 幂等 RPC，
 // 并发重复执行是安全的（重复 sweep 只是 no-op）。
@@ -172,9 +173,11 @@ func (r *Reconciler) SweepOnce(ctx context.Context) (Stats, error) {
 					}
 					continue
 				}
-				resp, err := r.cli.Reverse(ctx, &billingv1.ReverseRequest{
+				reverseCtx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
+				resp, err := r.cli.Reverse(reverseCtx, &billingv1.ReverseRequest{
 					RequestId: rid, BillId: int64(row.ID), Reason: "recon:no_usage",
 				})
+				cancel()
 				if err != nil {
 					stats.ReverseErrors++
 					r.log.Error("recon reverse", "request_id", rid, "err", err)
@@ -195,7 +198,7 @@ func (r *Reconciler) SweepOnce(ctx context.Context) (Stats, error) {
 				continue
 			}
 			// 有 marker：流已跑完，只差结算 → 补 Settle（按记录的 actual，幂等）。
-			settleCtx, cancel := context.WithTimeout(ctx, settleRPCTimeout)
+			settleCtx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
 			resp, err := r.cli.Settle(settleCtx, &billingv1.SettleRequest{RequestId: rid, BillId: int64(row.ID)})
 			cancel()
 			if err != nil {
@@ -231,7 +234,9 @@ func (r *Reconciler) RebuildAll(ctx context.Context) (Stats, error) {
 		return stats, err
 	}
 	for _, t := range tenants {
-		resp, err := r.cli.RebuildBalance(ctx, &billingv1.RebuildBalanceRequest{TenantId: int64(t.ID)})
+		rebuildCtx, cancel := context.WithTimeout(ctx, billingRPCTimeout)
+		resp, err := r.cli.RebuildBalance(rebuildCtx, &billingv1.RebuildBalanceRequest{TenantId: int64(t.ID)})
+		cancel()
 		if err != nil {
 			stats.RebuildErrors++
 			r.log.Error("recon rebuild", "tenant_id", t.ID, "err", err)

@@ -157,5 +157,11 @@ func (s *Store) repairOrphanGuard(ctx context.Context, tenant uint64, key string
 		return err
 	}
 	_, err = s.rebuildCash(ctx, tenant, key, owner)
+	if errors.Is(err, ErrLedgerBehind) {
+		// 批量窗口内不能从旧列重建。守卫保留（其存在正是防重放双应用的
+		// 语义），投影维持 Redis 权威值；操作本身仍按原失败上抛、重试在
+		// 窗口关闭后完成收敛——与外层 rebuildCash 调用点的哨兵过滤同口径。
+		return nil
+	}
 	return err
 }

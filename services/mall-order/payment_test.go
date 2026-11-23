@@ -663,3 +663,54 @@ func TestMarkPaidTx_LatePaidOnClosedOrderAutoRefunded(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 14. TestMarkPaidTx_ExcessPaidOnTerminalOrdersAutoRefunded（评审扩展回归）
+// refunded / paid / fulfilled 订单收到新单号等额 paid（渠道侧迟到或超额扣款）：
+// 同样直接落 refunded，不产生孤儿 paid 流水。
+func TestMarkPaidTx_ExcessPaidOnTerminalOrdersAutoRefunded(t *testing.T) {
+	s := openOrderTestStore(t)
+	ctx := context.Background()
+	cleanupTenant(t, s, testTenantA)
+	snapshotStock(t, s, 115)
+
+	payIt := func(orderNo string, tradeNo string, amount int64) {
+		t.Helper()
+		if err := s.MarkPaidTx(ctx, Callback{
+			OrderNo: orderNo, Provider: "mock", TradeNo: tradeNo,
+			Paid: true, AmountCent: amount, SignatureVerified: true,
+		}); err != nil {
+			t.Fatalf("MarkPaidTx(%s): %v", tradeNo, err)
+		}
+	}
+
+	// refunded 订单：正常支付 → 退款 → 新单号迟到 paid
+	ord1 := createTestOrder(t, s, ctx, testTenantA, "excess-refunded", 115, 1)
+	payIt(ord1.OrderNo, "T-excess-r1", ord1.AmountCent)
+	if err := s.RefundPaid(ctx, testTenantA, ord1.OrderNo); err != nil {
+		t.Fatalf("RefundPaid: %v", err)
+	}
+	payIt(ord1.OrderNo, "T-excess-r2", ord1.AmountCent)
+	var st []int8
+	if err := s.db.Raw("SELECT status FROM payment_records WHERE order_no = ? ORDER BY id", ord1.OrderNo).Scan(&st).Error; err != nil {
+		t.Fatalf("读流水: %v", err)
+	}
+	if len(st) != 2 || st[0] != 4 || st[1] != 4 {
+		t.Fatalf("refunded 订单流水 = %v，want [4 4]（第二笔超额扣款冲正为 refunded）", st)
+	}
+
+	// fulfilled 订单：正常支付履约后，新单号迟到 paid → refunded
+	ord2 := createTestOrder(t, s, ctx, testTenantA, "excess-fulfilled", 115, 1)
+	payIt(ord2.OrderNo, "T-excess-f1", ord2.AmountCent)
+	if err := s.db.Exec("UPDATE mall_orders SET status = ? WHERE order_no = ?", orderStatusFulfilled, ord2.OrderNo).Error; err != nil {
+		t.Fatalf("置 fulfilled: %v", err)
+	}
+	payIt(ord2.OrderNo, "T-excess-f2", ord2.AmountCent)
+	st = nil
+	if err := s.db.Raw("SELECT status FROM payment_records WHERE order_no = ? ORDER BY id", ord2.OrderNo).Scan(&st).Error; err != nil {
+		t.Fatalf("读流水: %v", err)
+	}
+	if len(st) != 2 || st[0] != 2 || st[1] != 4 {
+		t.Fatalf("fulfilled 订单流水 = %v，want [2 4]（首笔保留 paid，迟到超额笔冲正）", st)
+	}
+}

@@ -523,9 +523,8 @@ func TestLedgerQueueSettleBeforeReserveDoesNotDoubleCount(t *testing.T) {
 	}
 }
 
-// TestLedgerBatchWindowGuardNoResurrect（审查 H1/H2 修复回归）：批量落账
-// 窗口内（bill 在缓冲、账本列滞后），观测与对账的一切重建路径都必须跳过
-// ——否则旧列盖回 Redis 会复活已扣的钱。flush 后重建恢复功效（守卫不误伤）。
+// While the ledger column lags buffered bills, every rebuild path (observation,
+// reconciler, drift repair) must skip; after flush, rebuild works again.
 func TestLedgerBatchWindowGuardNoResurrect(t *testing.T) {
 	s, done := newTestStore(t)
 	defer done()
@@ -542,43 +541,44 @@ func TestLedgerBatchWindowGuardNoResurrect(t *testing.T) {
 		t.Fatalf("reserve balance = %d, want 900", reserved.BalanceAfter)
 	}
 
-	// 观测入口（H1）：MeOverview 不得复活余额、不得报「账单不一致」
+	// Observation path (H1): MeOverview must not resurrect the debit and
+	// must not fail with a ledger-mismatch error inside the window.
 	view, err := s.MeOverview(ctx, tenantID)
 	if err != nil {
 		t.Fatalf("MeOverview in batch window: %v", err)
 	}
 	if view.Balance != 900 {
-		t.Fatalf("MeOverview balance = %d, want 900（预扣被复活）", view.Balance)
+		t.Fatalf("MeOverview balance = %d, want 900 (debit resurrected)", view.Balance)
 	}
 
-	// 对账入口（H2）：RebuildBalance 跳过重建，返回 Redis 活值
+	// Reconciler path (H2): RebuildBalance skips and returns the live Redis value.
 	bal, err := s.RebuildBalance(ctx, tenantID)
 	if err != nil {
 		t.Fatalf("RebuildBalance in batch window: %v", err)
 	}
 	if bal != 900 {
-		t.Fatalf("RebuildBalance = %d, want 900（旧列盖回 Redis）", bal)
+		t.Fatalf("RebuildBalance = %d, want 900 (stale column overwrote redis)", bal)
 	}
 	live, err := s.getBalance(ctx, tenantID)
 	if err != nil || live != 900 {
-		t.Fatalf("redis balance = %d (err=%v), want 仍 900", live, err)
+		t.Fatalf("redis balance = %d (err=%v), want still 900", live, err)
 	}
 
-	// flush 落账后：窗口关闭，重建恢复正常工作
+	// After flush the window closes and rebuild works again.
 	if err := s.FlushLedgerBatch(ctx); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
 	bal, err = s.RebuildBalance(ctx, tenantID)
 	if err != nil || bal != 900 {
-		t.Fatalf("flush 后 RebuildBalance = %d (err=%v), want 900", bal, err)
+		t.Fatalf("RebuildBalance after flush = %d (err=%v), want 900", bal, err)
 	}
 
-	// 守卫不误伤正常对账：非窗口期的真漂移仍被修复
+	// The guard must not break legitimate repair: manual drift is still fixed.
 	if err := s.rdb.Set(ctx, BalanceKey(tenantID), 500, 0).Err(); err != nil {
-		t.Fatalf("手动弄脏投影: %v", err)
+		t.Fatalf("dirty the projection: %v", err)
 	}
 	bal, err = s.RebuildBalance(ctx, tenantID)
 	if err != nil || bal != 900 {
-		t.Fatalf("漂移修复 = %d (err=%v), want 900（守卫误伤正常对账）", bal, err)
+		t.Fatalf("drift repair = %d (err=%v), want 900 (guard blocked legitimate repair)", bal, err)
 	}
 }

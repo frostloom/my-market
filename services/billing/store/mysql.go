@@ -724,9 +724,15 @@ func (s *Store) balanceOrEnsure(ctx context.Context, tenantID uint64) (int64, er
 		return value, err
 	}
 	if err := s.ensureBalanceKey(ctx, tenantID); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("billing: ensure balance key for tenant %d: %w", tenantID, err)
 	}
-	return s.rdb.Get(ctx, BalanceKey(tenantID)).Int64()
+	value, err = s.rdb.Get(ctx, BalanceKey(tenantID)).Int64()
+	if errors.Is(err, goredis.Nil) {
+		// 批量窗口跳过补种（ErrLedgerBehind 吞掉）后仍可能缺键：带上下文
+		// 上抛（裸 redis: nil 不可判读），调用方按 Unavailable 重试。
+		return 0, fmt.Errorf("billing: balance key missing for tenant %d after ensure", tenantID)
+	}
+	return value, err
 }
 
 // EnsureBalanceKeys 启动时为活跃租户补建缺失的余额投影。
