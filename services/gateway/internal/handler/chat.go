@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -266,13 +267,23 @@ func forwardNonStream(c *gin.Context, b billingAPI, r routingAPI, log *slog.Logg
 			writeUpstreamBody(c, statusCode, errBody)
 			return
 		}
-		body, readErr := io.ReadAll(upResp.Body)
+		// 非流式响应上限 8MB（对齐 native.go 同限）：不设限时恶意/异常上游
+		// 可用超长 JSON 把网关内存拖爆。
+		const maxUpstreamBody = 8 << 20
+		body, readErr := io.ReadAll(io.LimitReader(upResp.Body, maxUpstreamBody+1))
 		upResp.Body.Close()
 		if readErr != nil {
 			// The upstream may have executed the request. Do not treat an
 			// incomplete response as usage, retry it, or refund it here.
 			log.Error("upstream response incomplete", "request_id", requestID, "err", readErr)
 			abort(c, http.StatusBadGateway, "upstream response incomplete")
+			return
+		}
+		if len(body) > maxUpstreamBody {
+			// 与「响应不完整」同姿态：上游可能已执行——不结算、不转发、不退款，
+			// 账单留给 reconciler 按无 usage 口径收敛。
+			log.Error("upstream response exceeds limit", "request_id", requestID, "limit", maxUpstreamBody)
+			abort(c, http.StatusBadGateway, "upstream response too large")
 			return
 		}
 		if upResp.StatusCode/100 != 2 {
@@ -449,7 +460,7 @@ func relayStream(c *gin.Context, b billingAPI, r routingAPI, log *slog.Logger, p
 		forwarded    strings.Builder
 	)
 	for {
-		line, err := reader.ReadBytes('\n')
+		line, err := readSSELine(reader, maxSSELine)
 		if err != nil && (err != io.EOF || len(line) == 0) {
 			if err != io.EOF && usageSeen == nil && !sawText {
 				log.Warn("upstream stream interrupted before content", "request_id", requestID, "err", err)
@@ -625,13 +636,51 @@ func settleAndLog(c *gin.Context, b billingAPI, log *slog.Logger, requestID stri
 	log.Info("settled", "request_id", requestID, "delta_quota", sResp.DeltaQuota, "balance_after", sResp.BalanceAfter)
 }
 
+// maxSSELine SSE 单行上限（对齐 native.go Scanner 的 1MB）：bufio.ReadBytes
+// 会为不含换行的超长行无限累积缓冲——恶意上游可借此让网关内存无界增长。
+const maxSSELine = 1 << 20
+
+var errSSELineTooLong = errors.New("upstream SSE line exceeds limit")
+
+// readSSELine 读一行（含 '\n'），语义与 bufio.ReadBytes('\n') 一致（EOF 时
+// 返回已读部分与 io.EOF）；单行累计超过 max 时停止累积并返回 errSSELineTooLong。
+func readSSELine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > max {
+			return nil, errSSELineTooLong
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return line, err
+	}
+}
+
+// isInternalUpstream 判定上游主机是否回环/内网——无渠道 key 时只有内网
+// （mock、同机调试）目标才允许透传客户端 Authorization；公网上游绝不接收
+// 租户 key（忘填 upstream_key 的真实渠道会把用户凭证泄漏给第三方）。
+// 解析不了的主机名按公网处理（保守）。
+func isInternalUpstream(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
+}
+
 func setUpstreamHeaders(uReq *http.Request, c *gin.Context, stream bool, upstreamKey string) {
 	uReq.Header.Set("Content-Type", "application/json")
 	auth := ""
 	if upstreamKey != "" {
 		auth = "Bearer " + upstreamKey // 真实渠道：用渠道自己的上游 key 鉴权，而不是租户 key
-	} else if a := c.GetHeader("Authorization"); a != "" {
-		auth = a // 无上游 key 的渠道（mock）维持透传
+	} else if a := c.GetHeader("Authorization"); a != "" && isInternalUpstream(uReq.URL.Hostname()) {
+		auth = a // 无渠道 key 的内网/mock 上游维持透传；公网上游不携带任何租户凭证
 	}
 	if auth != "" {
 		uReq.Header.Set("Authorization", auth)

@@ -6,7 +6,7 @@
 
 跑通完整商业闭环：**购买 → 入账 → 推理 → 计量 → 扣费**
 
-[![CI](https://img.shields.io/badge/CI-4%20jobs%20all%20green-brightgreen)](../../actions) [![milestones](https://img.shields.io/badge/R0–R2.7-已交付-blue)](docs/spec/acceptance.md) [![smoke](https://img.shields.io/badge/SMOKE-R0%2FR1%2FR2%2FR2.5%20PASS-success)](scripts/) [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](go.mod) [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![CI](https://github.com/frostloom/my-market/actions/workflows/ci.yml/badge.svg)](https://github.com/frostloom/my-market/actions/workflows/ci.yml) [![milestones](https://img.shields.io/badge/R0–R2.7-已交付-blue)](docs/spec/acceptance.md) [![smoke](https://img.shields.io/badge/SMOKE-R0%2FR1%2FR2%2CR2.5%20PASS-success)](scripts/) [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](go.mod) [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 </div>
 
@@ -21,7 +21,7 @@
 - 或者按月订阅**月卡**，每个滚动窗口内推理免费，超额再按量计费；
 - 也可以买手机、衣服——一条标准电商链路。
 
-支撑这个生意的是 **11 个独立部署的微服务**：商城域（浏览/下单/支付/履约）+ AI 域（网关/计费/路由/客服），两个域只通过 gRPC 契约通信，账本由计费服务独占，其余任何服务碰不到钱。
+支撑这个生意的是 **8 个独立部署的应用微服务**：商城域（浏览/下单/支付/履约）+ AI 域（网关/计费/路由/客服），两个域只通过 gRPC 契约通信，账本由计费服务独占，其余任何服务碰不到钱。（另有 MySQL/Redis/Kafka 三个基础设施容器随 compose 一键起，`services/` 下共 10 个目录——其中 mall-gen 是 proto 生成物包、seckill 是 R4 占位。）
 
 > 项目由已完成的 [ai-gateway](docs/ai-gateway/README.md)（AI 模型网关计费平台）融合生长而来：计费内核（原子预扣/幂等结算/对账）一行未动，在其上新建商城域并以 [ADR-011](docs/spec/adr/ADR-011-服务拆分与编译器强制边界.md) 完成服务化拆分。
 
@@ -159,7 +159,7 @@ bash tools/verify/ci-gotest-baseline.sh tools/verify/ci-baseline-ai-gateway.txt
 | 想了解 | 去哪 |
 |---|---|
 | 服务流转八图（时序） | [docs/architecture.md](docs/architecture.md) |
-| 产品需求与全部决策（D1-D19） | [docs/PRD.md](docs/PRD.md) |
+| 产品需求与全部决策（D1-D18） | [docs/PRD.md](docs/PRD.md) |
 | REST 契约 + 27 错误码全表 | [docs/spec/api-contract.md](docs/spec/api-contract.md) |
 | 数据库 DDL（9 表） | [docs/spec/db-schema.sql](docs/spec/db-schema.sql) |
 | 架构决策记录（11 篇 ADR） | [docs/spec/adr/](docs/spec/adr/) |

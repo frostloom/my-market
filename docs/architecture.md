@@ -90,7 +90,7 @@ flowchart TB
 
 ---
 
-## 2. 服务清单与端口（dev，已按代码核实）
+## 2. 服务清单与端口（dev；已按代码核实——seckill 行除外，为 R4 规划未实现）
 
 | 服务 | 端口 | 协议 | 状态 |
 |---|---|---|---|
@@ -102,7 +102,7 @@ flowchart TB
 | mall-bff | 18090 | HTTP（REST） | 新增 |
 | mall-goods | 9111 | gRPC | 新增 |
 | mall-order | 9112 | gRPC | 新增 |
-| seckill | 9113 | gRPC | 新增 |
+| seckill | 9113 | gRPC | 规划（R4，未实现——目录仅占位） |
 | MySQL | 3307 | — | 已有（+market 库） |
 | Redis | 6381 | — | 已有 |
 | Kafka | **容器 9092 / 宿主 29092** | — | 已有（+新 topic，Producer 单 topic 需新实例） |

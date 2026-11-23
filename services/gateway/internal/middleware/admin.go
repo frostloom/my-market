@@ -24,7 +24,8 @@ func AdminSession(billingAdminBase, svcToken, controlToken string, log *slog.Log
 			return
 		}
 		// 与 env 固定值相等 → 直接放行（本机 curl 演示；正式环境 svcToken 置空即关闭）。
-		if svcToken != "" && tok == svcToken {
+		// 恒时比较（controlplane.Valid 同款）：逐字节 == 会向探测方泄漏匹配进度。
+		if controlplane.Valid(tok, svcToken) {
 			c.Next()
 			return
 		}
