@@ -281,7 +281,7 @@ func forwardNonStream(c *gin.Context, b billingAPI, r routingAPI, log *slog.Logg
 		}
 		if len(body) > maxUpstreamBody {
 			// 与「响应不完整」同姿态：上游可能已执行——不结算、不转发、不退款，
-			// 账单留给 reconciler 按无 usage 口径收敛。
+			// 账单留给 reconciler 按无 usage 口径处置（D16：默认保留待核查）。
 			log.Error("upstream response exceeds limit", "request_id", requestID, "limit", maxUpstreamBody)
 			abort(c, http.StatusBadGateway, "upstream response too large")
 			return
@@ -462,7 +462,9 @@ func relayStream(c *gin.Context, b billingAPI, r routingAPI, log *slog.Logger, p
 	for {
 		line, err := readSSELine(reader, maxSSELine)
 		if err != nil && (err != io.EOF || len(line) == 0) {
-			if err != io.EOF && usageSeen == nil && !sawText {
+			if errors.Is(err, errSSELineTooLong) {
+				log.Warn("upstream SSE line exceeds limit; stopping relay", "request_id", requestID, "limit", maxSSELine)
+			} else if err != io.EOF && usageSeen == nil && !sawText {
 				log.Warn("upstream stream interrupted before content", "request_id", requestID, "err", err)
 			}
 			break

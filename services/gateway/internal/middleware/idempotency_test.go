@@ -10,9 +10,11 @@ import (
 
 // Idempotency-Key 参与去重（审查 M9 修复）：同租户同 key → 同 request_id
 // （重试映射到同一预扣/结算）；不同 key / 不带 key → 不同 id；不同租户同 key 也不串。
+// tenant 用 int64 注入——镜像生产接线（apikey/portal 存 protobuf int64），
+// 防止 GetInt64/GetUint64 类型失配回归。
 func TestIdempotencyKeyDerivesStableRequestID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	run := func(tenant uint64, key string) string {
+	run := func(tenant int64, key string) string {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

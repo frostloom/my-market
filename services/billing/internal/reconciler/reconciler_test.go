@@ -259,3 +259,33 @@ func TestRebuildAll_CountsAndToleratesErrors(t *testing.T) {
 		t.Fatalf("stats = %+v rebuild = %v, want 2 active tenants", stats, fake.rebuildCalls)
 	}
 }
+
+// 7. 并发 sweep 可重入：两轮同时跑都成功、无 panic——写侧幂等由 billing
+// RPC 保证，这里验证扫描与计数本身并发安全（upperID 冻结 + 分页不互踩）。
+func TestSweepOnce_ConcurrentSweepsAreSafe(t *testing.T) {
+	r, fake, _ := newTestReconciler(t)
+	usage := time.Now().Add(-time.Hour)
+	seedBill(t, r.db, "recon-conc-1", 1, 2*time.Hour, &usage)
+	seedBill(t, r.db, "recon-conc-2", 1, 2*time.Hour, nil)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = r.SweepOnce(context.Background())
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent sweep %d: %v", i, err)
+		}
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.settleCalls) < 1 {
+		t.Fatalf("settle calls = %v, want at least the usage-reported bill", fake.settleCalls)
+	}
+}
