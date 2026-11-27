@@ -697,6 +697,10 @@ func (s *Store) payRechargeCash(ctx context.Context, orderNo string) (*RechargeO
 		if err := s.requireCashMatch(ctx, o.TenantID); err != nil {
 			return nil, fmt.Errorf("订单已支付，但余额投影未能对齐：%w", err)
 		}
+		// 重放同样补应用投影（topup 标记保证已应用过的不再动账）。
+		if _, err := s.applyTopupProjection(ctx, o.TenantID, TopupRecharge, o.OrderNo, -o.AmountCent); err != nil {
+			return nil, fmt.Errorf("订单已支付，余额投影刷新失败：%w", err)
+		}
 		return o, nil
 	}
 	if o.Status != RechargePending {
@@ -747,6 +751,11 @@ func (s *Store) payRechargeCash(ctx context.Context, orderNo string) (*RechargeO
 	if err := s.requireCashMatch(ctx, o.TenantID); err != nil {
 		return nil, fmt.Errorf("订单已支付入账，余额投影待恢复，请使用同一订单重试：%w", err)
 	}
+	// 与 Credit 同因：批量模式下 requireCashMatch 不重建投影，入账的额度必须
+	// 自己按增量应用到 Redis，否则订单已 paid、余额却停在旧值。
+	if _, err := s.applyTopupProjection(ctx, o.TenantID, TopupRecharge, o.OrderNo, -o.AmountCent); err != nil {
+		return nil, fmt.Errorf("订单已支付入账，余额投影刷新失败：%w", err)
+	}
 	return o, nil
 }
 
@@ -783,6 +792,15 @@ func (s *Store) refundRechargeCash(ctx context.Context, tenantID uint64, orderNo
 	if o.Status == RechargeRefunded {
 		if err := s.requireCashMatch(ctx, tenantID); err != nil {
 			return nil, fmt.Errorf("订单已退款，余额投影待恢复：%w", err)
+		}
+		// 重放同样补应用投影；历史行的实际退额以流水为准（-Amount）。
+		var prior Topup
+		delta := int64(0)
+		if err := s.db.WithContext(ctx).Where("ref_type = ? AND ref_id = ?", TopupRefund, o.OrderNo).First(&prior).Error; err == nil {
+			delta = -prior.Amount
+		}
+		if _, err := s.applyTopupProjection(ctx, tenantID, TopupRefund, o.OrderNo, delta); err != nil {
+			return nil, fmt.Errorf("订单已退款，余额投影刷新失败：%w", err)
 		}
 		return &RefundResult{OrderNo: o.OrderNo, AmountCent: o.AmountCent, RefundCent: 0, BalanceAfter: mustBalance(s, ctx, tenantID)}, nil
 	}
@@ -826,6 +844,10 @@ func (s *Store) refundRechargeCash(ctx context.Context, tenantID uint64, orderNo
 	if err := s.requireCashMatch(ctx, tenantID); err != nil {
 		return nil, fmt.Errorf("订单已退款入账，余额投影待恢复，请使用同一订单重试：%w", err)
 	}
+	// 退款在投影上是正向 delta（settle 语义）；同因见 Credit。
+	if _, err := s.applyTopupProjection(ctx, tenantID, TopupRefund, o.OrderNo, refund); err != nil {
+		return nil, fmt.Errorf("订单已退款入账，余额投影刷新失败：%w", err)
+	}
 	return &RefundResult{OrderNo: o.OrderNo, AmountCent: o.AmountCent, RefundCent: refund, BalanceAfter: bal - refund}, nil
 }
 
@@ -864,6 +886,10 @@ func (s *Store) refundAmountCash(ctx context.Context, tenantID uint64, amountMon
 		if err := s.requireCashMatch(ctx, tenantID); err != nil {
 			return nil, fmt.Errorf("退款已入账，余额投影待恢复：%w", err)
 		}
+		// 重放同样补应用投影；历史行的实际退额以流水为准。
+		if _, err := s.applyTopupProjection(ctx, tenantID, TopupRefund, idemKey, -existing.Amount); err != nil {
+			return nil, fmt.Errorf("退款已入账，余额投影刷新失败：%w", err)
+		}
 		return &RefundResult{OrderNo: "", AmountCent: target, RefundCent: 0, BalanceAfter: mustBalance(s, ctx, tenantID)}, nil
 	}
 	bal, err := LedgerBalance(ctx, s.db, tenantID)
@@ -891,6 +917,10 @@ func (s *Store) refundAmountCash(ctx context.Context, tenantID uint64, amountMon
 	}
 	if err := s.requireCashMatch(ctx, tenantID); err != nil {
 		return nil, fmt.Errorf("退款已入账，余额投影待恢复，请使用同一幂等键重试：%w", err)
+	}
+	// 退款在投影上是正向 delta（settle 语义）；同因见 Credit。
+	if _, err := s.applyTopupProjection(ctx, tenantID, TopupRefund, idemKey, refund); err != nil {
+		return nil, fmt.Errorf("退款已入账，余额投影刷新失败：%w", err)
 	}
 	return &RefundResult{OrderNo: "", AmountCent: target, RefundCent: refund, BalanceAfter: bal - refund}, nil
 }
@@ -937,9 +967,11 @@ func (s *Store) creditCash(ctx context.Context, tenantID uint64, amountCent int6
 		if err := s.requireCashMatch(ctx, tenantID); err != nil {
 			return 0, false, status.Errorf(codes.Unavailable, "已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
 		}
-		bal, balErr := LedgerBalance(ctx, s.db, tenantID)
-		if balErr != nil {
-			return 0, false, balErr
+		// 重放也要把增量应用到投影：首次入账可能因 Redis 故障没刷成投影，
+		// 错误信息正是让调用方「用同一 ref 重试」。topup 标记保证已应用过的不再动账。
+		bal, err := s.applyTopupProjection(ctx, tenantID, refType, refID, -amountCent)
+		if err != nil {
+			return 0, false, status.Errorf(codes.Unavailable, "已入账，余额投影刷新失败：%v", err)
 		}
 		return bal, false, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -982,17 +1014,64 @@ func (s *Store) creditCash(ctx context.Context, tenantID uint64, amountCent int6
 	}); err != nil {
 		return 0, false, err
 	}
+	// 入账只动 MySQL 账本，Redis 投影不会自己跟上：requireCashMatch 在批量
+	// 模式下遇到「key 存在但与账本不等」按设计放行（Redis 是权威，不能拿旧列
+	// 盖回去），而 GetBalance 只在 key 缺失时重建。结果是账本已加钱、投影仍是
+	// 旧值——用户看到 0 元，Reserve 读到 0 直接拒付，钱在账上却花不出去。
+	// 所以在锁内把净额按增量应用到投影上（不是用账本列覆盖：批量窗口里账本列
+	// 落后于 Redis，覆盖会把在途扣款复活）。
 	if err := s.requireCashMatch(ctx, tenantID); err != nil {
 		return 0, false, status.Errorf(codes.Unavailable, "已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
 	}
-	if !created {
-		bal, err = LedgerBalance(ctx, s.db, tenantID)
-		if err != nil {
-			return 0, false, err
-		}
-		return bal, false, nil
+	live, err := s.applyTopupProjection(ctx, tenantID, refType, refID, -amountCent)
+	if err != nil {
+		return 0, false, status.Errorf(codes.Unavailable, "已入账，余额投影刷新失败：%v", err)
 	}
-	return bal + amountCent, true, nil
+	return live, created, nil
+}
+
+// applyTopupProjection 把一笔入账/退款的净额恰好应用一次到 Redis 投影。
+//
+// 为什么是增量而不是重建：批量落账模式下账本列落后于 Redis（pending 里还有未落库
+// 的 reserve/settle 净额）。用账本列覆盖投影会把在途扣款「复活」，并发请求能再花
+// 一次；而增量保持不变式「Redis = 账本列 + pending」，在有在途流量时同样成立。
+//
+// 投影 key 缺失时不按 0 起算（会丢 initial_quota），而是补种一次再应用——补种走
+// rebuildCash，它自带批量窗口哨兵，窗口内只能放弃（Redis 才是权威值，等下一轮）。
+//
+// 返回值：应用后 Redis 上的余额。delta 语义同 settle：正数=扣减，负数=退回。
+//
+// 非批量模式不需要这一步：调用方前面的 requireCashMatch 发现投影与账本不符时
+// 会直接 rebuildCash 到账本（账本已含本次增量），再增量应用就重复记账了。
+// 批量模式则相反——requireCashMatch 遇到「key 存在但与账本不等」按设计放行，
+// 重建根本不会发生，所以必须在这里补增量。
+func (s *Store) applyTopupProjection(ctx context.Context, tenantID uint64, refType, refID string, delta int64) (int64, error) {
+	if s.batch == nil {
+		return s.getBalance(ctx, tenantID)
+	}
+	guard := TopupGuardKey(refType, refID)
+	res, err := s.runCashLua(ctx, topupLua, []string{BalanceKey(tenantID), guard}, delta)
+	if err != nil {
+		return 0, status.Errorf(codes.Unavailable, "topup lua: %v", err)
+	}
+	code, bal, _ := parseLuaTriple(res)
+	if code != -1 {
+		return bal, nil
+	}
+	// 投影缺失：补种后再应用一次。补种失败（批量窗口内）只能放弃——
+	// 此时 Redis 缺键是已知的「待下一轮收敛」状态，不能凭旧列编一个值。
+	if _, err := s.rebuildCash(ctx, tenantID, "", ""); err != nil {
+		return 0, status.Errorf(codes.Unavailable, "topup projection seed: %v", err)
+	}
+	res, err = s.runCashLua(ctx, topupLua, []string{BalanceKey(tenantID), guard}, delta)
+	if err != nil {
+		return 0, status.Errorf(codes.Unavailable, "topup lua: %v", err)
+	}
+	code, bal, _ = parseLuaTriple(res)
+	if code == -1 {
+		return 0, status.Errorf(codes.Unavailable, "topup projection missing after seed")
+	}
+	return bal, nil
 }
 
 // RefundCent 按分退款（R2 商城冲退 gRPC 入口）：退款量 = min(amountCent, 当前余额)，绝不退负。
@@ -1031,6 +1110,11 @@ func (s *Store) refundCentCash(ctx context.Context, tenantID uint64, amountCent 
 		if err := s.requireCashMatch(ctx, tenantID); err != nil {
 			return 0, status.Errorf(codes.Unavailable, "退款已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
 		}
+		// 与 Credit 同理：重放要补应用投影（topup 标记保证不会重复动账）。
+		// 历史行的实际退额是 -existing.Amount，不是本次请求的 amountCent。
+		if _, err := s.applyTopupProjection(ctx, tenantID, TopupRefund, ref, -existing.Amount); err != nil {
+			return 0, status.Errorf(codes.Unavailable, "退款已入账，余额投影刷新失败：%v", err)
+		}
 		return 0, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, err
@@ -1063,6 +1147,12 @@ func (s *Store) refundCentCash(ctx context.Context, tenantID uint64, amountCent 
 	}
 	if err := s.requireCashMatch(ctx, tenantID); err != nil {
 		return 0, status.Errorf(codes.Unavailable, "退款已入账，余额投影待恢复，请用同一 ref 重试：%v", err)
+	}
+	// 与 Credit 同因：退款只改 MySQL 账本，必须把净额按增量应用到 Redis 投影，
+	// 否则余额查询继续返回退款前的旧值（多显示一份已退掉的钱，可被继续消费）。
+	// 退款在投影上是正向 delta（settle 语义：新余额 = 旧余额 - delta）。
+	if _, err := s.applyTopupProjection(ctx, tenantID, TopupRefund, ref, refund); err != nil {
+		return 0, status.Errorf(codes.Unavailable, "退款已入账，余额投影刷新失败：%v", err)
 	}
 	return refund, nil
 }

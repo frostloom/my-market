@@ -42,6 +42,9 @@ var compensateLua string
 //go:embed lua/settle.lua
 var settleLua string
 
+//go:embed lua/topup.lua
+var topupLua string
+
 // 账单状态机。
 const (
 	PhaseReserve = "reserve"
@@ -140,6 +143,12 @@ type Bill struct {
 func BalanceKey(tenantID uint64) string     { return fmt.Sprintf("billing:balance:%d", tenantID) }
 func ReqGuardKey(requestID string) string   { return fmt.Sprintf("billing:req:%s", requestID) }
 func DeltaGuardKey(requestID string) string { return fmt.Sprintf("billing:delta:%s", requestID) }
+
+// TopupGuardKey 入账/退款在 Redis 投影上的应用标记。按 (ref_type, ref_id) 去重，
+// 与 topups 表的 uk_ref 同一幂等键：同 ref 重放不会把增量应用第二次。
+func TopupGuardKey(refType, refID string) string {
+	return fmt.Sprintf("billing:topup:%s:%s", refType, refID)
+}
 func UsageKey(requestID string) string      { return fmt.Sprintf("usage:%s", requestID) }
 
 // ---------- Store ----------
